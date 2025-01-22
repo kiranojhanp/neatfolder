@@ -1,17 +1,18 @@
 # NeatFolder
 
-A high-performance file organization CLI tool that automatically sorts files into meaningful categories.
+A fast CLI tool to organize files into useful categories.
 
 ## Features
 
-- Four organization methods:
-  - **Extension**: Groups by file types (images, docs, etc.)
-  - **Name**: Groups by filename patterns
-  - **Date**: Sorts by modification date
-  - **Size**: Categorizes by file size
-- Parallel processing for speed
-- Recursive directory support
-- Dry-run mode
+- Organize by:
+  - **Extension**: File types (images, docs, etc.)
+  - **Name**: Filename patterns
+  - **Date**: Modification date
+  - **Size**: File size
+- Blazingly fast with parallel processing
+- Supports subfolders (recursive)
+- Dry-run preview tree
+- No external dependencies
 
 ## Installation
 
@@ -24,23 +25,23 @@ bun install -g neatfolder
 ```bash
 neatfolder [directory] [options]
 
-# Basic examples
-neatfolder ~/Downloads                   # Organize current directory by extension
-neatfolder ~/Documents -m name           # Group by filename
-neatfolder ~/Pictures -m date -r         # Sort recursively by date
-neatfolder . --dry-run                   # Preview changes
+# Examples
+neatfolder ~/Downloads                  # Sort by extension
+neatfolder ~/Documents -m name          # Sort by name
+neatfolder ~/Pictures -m date -r        # Sort by date (recursive)
+neatfolder . --dry-run                  # Preview changes
 ```
 
 ### Options
 
 - `-m, --method <type>`: extension|name|date|size
-- `-r, --recursive`: Include subdirectories
-- `-d, --max-depth <n>`: Max recursion depth
+- `-r, --recursive`: Include subfolders
+- `-d, --max-depth <n>`: Max folder depth
 - `--min-size <bytes>`: Minimum file size
 - `--max-size <bytes>`: Maximum file size
 - `--ignore-dotfiles`: Skip hidden files
-- `--dry-run`: Preview only
-- `-v, --verbose`: Show details
+- `--dry-run`: Preview without changes
+- `-v, --verbose`: Show more details
 
 ## File Categories
 
