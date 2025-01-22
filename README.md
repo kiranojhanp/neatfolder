@@ -17,7 +17,7 @@ A fast CLI tool to organize files into useful categories.
 ## Installation
 
 ```bash
-bun install -g neatfolder
+npm install -g neatfolder
 ```
 
 ## Usage
