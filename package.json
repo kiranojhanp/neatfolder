@@ -32,10 +32,11 @@
     "commander": "13.1.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "tsup": "^8.3.5"
+    "@types/bun": "1.1.18",
+    "tsup": "8.3.5"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "5.0.0",
+    "bumpp": "9.10.1"
   }
 }
