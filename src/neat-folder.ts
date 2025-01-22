@@ -147,10 +147,16 @@ export class NeatFolder {
       if (mapping) fileMappings.push(mapping);
     }
 
+    const totalFiles = fileMappings.length;
+    if (totalFiles === 0) {
+      console.log(
+        `${ANSI_STYLES.CYAN}${ANSI_STYLES.BOLD}No files found to organize in ${directory}${ANSI_STYLES.RESET}`
+      );
+      return;
+    }
+
     console.log("Starting file organization...");
     const finalRunStructure = new Map<string, Set<string>>();
-
-    const totalFiles = fileMappings.length;
     const chunkSize = Math.max(1, Math.min(totalFiles, cpus().length * 2));
 
     for (let i = 0; i < fileMappings.length; i += chunkSize) {
@@ -164,16 +170,9 @@ export class NeatFolder {
 
     console.log(); // Newline after progress bar
 
-    if (initialStructure.size === 0 || finalRunStructure.size === 0) {
-      console.log(
-        `${ANSI_STYLES.CYAN}${ANSI_STYLES.BOLD}🎉 Folder organization not required! Your files are already neat and tidy.${ANSI_STYLES.RESET}`
-      );
-      return;
-    }
-
     if (!this.options.dryRun) {
       console.log(
-        `${ANSI_STYLES.BLUE}${ANSI_STYLES.BOLD}🎉 Folder organization completed successfully! Your files are now neat and tidy.${ANSI_STYLES.RESET}`
+        `${ANSI_STYLES.BLUE}${ANSI_STYLES.BOLD}Organization complete: ${this.stats.filesProcessed} files processed.${ANSI_STYLES.RESET}`
       );
       return;
     }
