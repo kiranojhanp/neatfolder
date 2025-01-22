@@ -141,7 +141,11 @@ class NeatFolder {
         modifiedTime: stats.mtime,
       };
     } catch (error) {
-      this.stats.errors.push(`Failed to process ${filePath}: ${error}`);
+      if (error instanceof Error) {
+        this.stats.errors.push(
+          `Failed to process ${filePath}: ${error.message || error}`
+        );
+      }
       return null;
     }
   }
@@ -156,7 +160,11 @@ class NeatFolder {
       this.stats.filesProcessed++;
       this.stats.bytesMoved += mapping.size;
     } catch (error) {
-      this.stats.errors.push(`Failed to move ${mapping.sourcePath}: ${error}`);
+      if (error instanceof Error) {
+        this.stats.errors.push(
+          `Failed to move ${mapping.sourcePath}: ${error.message || error}`
+        );
+      }
     }
   }
 
@@ -176,7 +184,7 @@ class NeatFolder {
 
   public async organize(directory: string): Promise<void> {
     const startTime = Date.now();
-    const resolvedPath = resolve(directory);
+    const resolvedPath = resolve(directory || ".");
 
     if (!(await this.isValidPath(resolvedPath))) {
       throw new Error(`Cannot access directory: ${resolvedPath}`);
@@ -220,7 +228,7 @@ class NeatFolder {
       this.stats.errors.forEach((error) => console.error(`- ${error}`));
     }
 
-    if (this.stats.skipped.length > 0 && this.options.verbose) {
+    if (this.stats.skipped.length > 0) {
       console.log("\nSkipped files:");
       this.stats.skipped.forEach((skip) => console.log(`- ${skip}`));
     }
@@ -238,22 +246,41 @@ program
     "extension"
   )
   .option("-r, --recursive", "Process subdirectories recursively", false)
-  .option("-d, --max-depth <number>", "Maximum recursion depth", "5")
-  .option("--min-size <bytes>", "Minimum file size in bytes", "0")
-  .option("--max-size <bytes>", "Maximum file size in bytes")
+  .option(
+    "-d, --max-depth <number>",
+    "Maximum recursion depth",
+    (value) => parseInt(value, 10),
+    5
+  )
+  .option(
+    "--min-size <bytes>",
+    "Minimum file size in bytes",
+    (value) => parseInt(value, 10),
+    0
+  )
+  .option("--max-size <bytes>", "Maximum file size in bytes", (value) =>
+    parseInt(value, 10)
+  )
   .option("--ignore-dotfiles", "Ignore dotfiles", false)
   .option("--dry-run", "Show what would be done without making changes", false)
   .option("-v, --verbose", "Show detailed output", false)
   .action(async (directory: string, cmdOptions) => {
     try {
+      const validMethods = ["extension", "name", "date", "size"];
+      if (!validMethods.includes(cmdOptions.method)) {
+        throw new Error(`Invalid method: ${cmdOptions.method}`);
+      }
+
       const options: OrganizationOptions = {
         method: cmdOptions.method as "extension" | "name" | "date" | "size",
         ignoreDotfiles: cmdOptions.ignoreDotfiles,
         recursive: cmdOptions.recursive,
         dryRun: cmdOptions.dryRun,
-        maxDepth: parseInt(cmdOptions.maxDepth),
-        minSize: parseInt(cmdOptions.minSize),
-        maxSize: cmdOptions.maxSize ? parseInt(cmdOptions.maxSize) : Infinity,
+        maxDepth: parseInt(cmdOptions.maxDepth, 10),
+        minSize: parseInt(cmdOptions.minSize, 10),
+        maxSize: cmdOptions.maxSize
+          ? parseInt(cmdOptions.maxSize, 10)
+          : Infinity,
         verbose: cmdOptions.verbose,
       };
 
