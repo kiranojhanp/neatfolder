@@ -1,15 +1,41 @@
 {
   "name": "neatfolder",
-  "module": "index.ts",
-  "type": "module",
+  "version": "0.0.0",
+  "description": "Organize folders by filetype",
+  "homepage": "https://github.com/kiranojhanp/neatfolder#readme",
+  "bugs": "https://github.com/kiranojhanp/neatfolder/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kiranojhanp/neatfolder.git"
+  },
+  "license": "MIT",
+  "author": "Kiran Ojha <kiranojha1226@gmail.com>",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "release": "bumpp --commit --push --tag && npm publish",
+    "start": "bun ./dist/index.js"
+  },
+  "dependencies": {
+    "commander": "13.1.0"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
-  },
-  "dependencies": {
-    "commander": "13.1.0"
   }
 }
