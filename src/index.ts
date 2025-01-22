@@ -68,8 +68,16 @@ class NeatFolder {
 
   private async createDirectory(path: string): Promise<void> {
     if (!this.options.dryRun) {
-      await mkdir(path, { recursive: true });
-      this.stats.created.add(path);
+      try {
+        await mkdir(path, { recursive: true });
+      } catch (error) {
+        if (error instanceof Error) {
+          this.stats.errors.push(
+            `Failed to create directory ${path}: ${error.message}`
+          );
+          return; // Skip this file but continue with others
+        }
+      }
     }
   }
 
