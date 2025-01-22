@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { NeatFolder } from "./neat-folder";
 import { FILE_CATEGORIES } from "./constants";
