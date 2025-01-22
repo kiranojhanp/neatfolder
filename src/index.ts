@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { NeatFolder } from "./neat-folder";
 import { FILE_CATEGORIES } from "./constants";
 import { ProgressService } from "./services/progress";
