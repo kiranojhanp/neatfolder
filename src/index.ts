@@ -43,9 +43,8 @@ const FILE_CATEGORIES = new Map([
   [/\.(ttf|otf|woff|woff2)$/i, "fonts"],
 ]);
 
-class FileOrganizer {
+class NeatFolder {
   private readonly options: OrganizationOptions;
-  private readonly processedPaths = new Set<string>();
   private readonly stats = {
     filesProcessed: 0,
     bytesMoved: 0,
@@ -230,7 +229,7 @@ class FileOrganizer {
 
 // CLI Configuration
 program
-  .name("file-organizer")
+  .name("neat-folder")
   .description("Advanced file organization utility")
   .argument("[directory]", "Directory to organize", ".")
   .option(
@@ -258,7 +257,7 @@ program
         verbose: cmdOptions.verbose,
       };
 
-      const organizer = new FileOrganizer(options);
+      const organizer = new NeatFolder(options);
       await organizer.organize(directory);
     } catch (error: any) {
       console.error("Fatal error:", error.message);
