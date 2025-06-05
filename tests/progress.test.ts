@@ -2,6 +2,11 @@ import { test, expect, describe, beforeEach, afterEach, spyOn } from "bun:test";
 import { ProgressService } from "../src/services/progress";
 import type { OrganizationStats } from "../src/types";
 
+// Helper function to strip ANSI color codes
+function stripAnsiCodes(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 // Helper function to create mock stats
 function createMockStats(
   overrides: Partial<OrganizationStats> = {}
@@ -86,7 +91,8 @@ describe("ProgressService", () => {
 
       for (const progress of progressValues) {
         const progressBar = progressService.drawProgressBar(progress);
-        const barContent = progressBar.match(/\[(.*?)\]/)?.[1];
+        const strippedBar = stripAnsiCodes(progressBar);
+        const barContent = strippedBar.match(/\[(.*?)\]/)?.[1];
 
         expect(barContent).toBeDefined();
         expect(barContent!.length).toBe(30);
@@ -124,11 +130,15 @@ describe("ProgressService", () => {
 
       progressService.printSummary(stats, duration, true);
 
-      expect(consoleSpy.log).toHaveBeenCalledWith("\nOrganization Summary:");
-      expect(consoleSpy.log).toHaveBeenCalledWith("Files processed: 10");
-      expect(consoleSpy.log).toHaveBeenCalledWith("Total data moved: 1.00 MB");
-      expect(consoleSpy.log).toHaveBeenCalledWith("Time taken: 2.50 seconds");
-      expect(consoleSpy.log).toHaveBeenCalledWith("Directories created: 2");
+      // Check that the console.log was called 5 times with the expected content
+      const calls = consoleSpy.log.mock.calls;
+      expect(calls).toHaveLength(5);
+
+      expect(calls[0][0]).toBe("\nOrganization Summary:");
+      expect(calls[1][0]).toBe("Files processed: 10");
+      expect(calls[2][0]).toBe("Total data moved: 1 MB"); // formatSize removes trailing zeros
+      expect(calls[3][0]).toBe("Time taken: 2.50 seconds");
+      expect(calls[4][0]).toBe("Directories created: 2");
     });
 
     test("should not print summary when verbose is false", () => {
@@ -142,13 +152,14 @@ describe("ProgressService", () => {
 
     test("should format bytes correctly", () => {
       const testCases = [
-        { bytes: 1024, expected: "0.00 MB" },
-        { bytes: 1048576, expected: "1.00 MB" },
-        { bytes: 2097152, expected: "2.00 MB" },
-        { bytes: 1572864, expected: "1.50 MB" },
+        { bytes: 1024, expected: "1 KB" }, // formatSize removes trailing zeros
+        { bytes: 1048576, expected: "1 MB" }, // formatSize removes trailing zeros
+        { bytes: 2097152, expected: "2 MB" }, // formatSize removes trailing zeros
+        { bytes: 1572864, expected: "1.5 MB" }, // 1.5 MB (no trailing zero to remove)
       ];
 
       for (const { bytes, expected } of testCases) {
+        consoleSpy.log.mockClear(); // Clear previous calls
         const stats = createMockStats({ bytesMoved: bytes });
 
         progressService.printSummary(stats, 1, true);
@@ -213,7 +224,7 @@ describe("ProgressService", () => {
       progressService.printSummary(stats, 0, true);
 
       expect(consoleSpy.log).toHaveBeenCalledWith("Files processed: 0");
-      expect(consoleSpy.log).toHaveBeenCalledWith("Total data moved: 0.00 MB");
+      expect(consoleSpy.log).toHaveBeenCalledWith("Total data moved: 0 B"); // formatSize returns "0 B" for 0 bytes
       expect(consoleSpy.log).toHaveBeenCalledWith("Time taken: 0.00 seconds");
       expect(consoleSpy.log).toHaveBeenCalledWith("Directories created: 0");
     });
@@ -245,7 +256,7 @@ describe("ProgressService", () => {
 
       expect(consoleSpy.log).toHaveBeenCalledWith("Files processed: 1000000");
       expect(consoleSpy.log).toHaveBeenCalledWith(
-        "Total data moved: 1024000.00 MB"
+        "Total data moved: 1000 GB" // formatSize converts to GB and removes trailing zeros
       );
       expect(consoleSpy.log).toHaveBeenCalledWith("Directories created: 100");
     });
@@ -292,7 +303,7 @@ describe("ProgressService", () => {
       progressService.printSummary(stats, 15.75, true);
 
       expect(consoleSpy.log).toHaveBeenCalledWith("Files processed: 42");
-      expect(consoleSpy.log).toHaveBeenCalledWith("Total data moved: 50.00 MB");
+      expect(consoleSpy.log).toHaveBeenCalledWith("Total data moved: 50 MB");
       expect(consoleSpy.log).toHaveBeenCalledWith("Time taken: 15.75 seconds");
       expect(consoleSpy.log).toHaveBeenCalledWith("Directories created: 4");
       expect(consoleSpy.error).toHaveBeenCalledWith(
@@ -308,9 +319,10 @@ describe("ProgressService", () => {
         progressService.drawProgressBar(step)
       );
 
-      // All should have same format
+      // All should have same format (after stripping ANSI codes)
       for (const bar of progressBars) {
-        expect(bar).toMatch(/^\[.{30}\] \d+\.\d{2}%$/);
+        const strippedBar = stripAnsiCodes(bar);
+        expect(strippedBar).toMatch(/^\[.{30}\] \d+\.\d{2}%$/);
       }
 
       // Progress should be visually increasing
