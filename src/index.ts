@@ -15,6 +15,8 @@ interface ParsedArguments {
   ignoreDotfiles: boolean;
   dryRun: boolean;
   verbose: boolean;
+  quiet: boolean;
+  noDryRun: boolean;
   // Database operations
   undo: boolean;
   redo?: string;
@@ -72,6 +74,23 @@ const parseNumber = (value: string, name: string, min: number = 0): number => {
   return num;
 };
 
+// Interactive confirmation function
+const askForConfirmation = async (message: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const readline = require("readline");
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    rl.question(`${message} (y/N): `, (answer: string) => {
+      rl.close();
+      const normalizedAnswer = answer.toLowerCase().trim();
+      resolve(normalizedAnswer === "y" || normalizedAnswer === "yes");
+    });
+  });
+};
+
 const showHelp = () => {
   console.log(`
 NeatFolder - Organize files by type, name, date, or size
@@ -80,13 +99,15 @@ Usage: neatfolder [directory] [options]
 
 Options:
   -m, --method <type>     Organization method: extension|name|date|size (default: extension)
-  -r, --recursive         Include subdirectories
+  -r, --recursive         Include subdirectories (default: true)
   -d, --max-depth <n>     Maximum directory depth (default: 5)
   --min-size <size>       Minimum file size filter (e.g., 1KB, 1MB)
   --max-size <size>       Maximum file size filter (e.g., 100MB, 1GB)
   --ignore-dotfiles       Skip hidden files
   --dry-run               Preview changes without moving files
-  -v, --verbose           Show detailed output
+  --no-dry-run            Actually move files (skip confirmation prompt)
+  -v, --verbose           Show detailed output (default: true)
+  -q, --quiet             Suppress detailed output
   --database-path <path>  Custom database file path
   -h, --help              Show this help message
 
@@ -100,16 +121,22 @@ Database Operations:
   --export-history <file> Export history to JSON file
 
 Examples:
-  neatfolder ~/Downloads                    # Organize by file extension
-  neatfolder ~/Documents -m name -r         # Organize by name, recursive
-  neatfolder . --dry-run                    # Preview organization
-  neatfolder . --min-size 1MB --max-size 100MB  # Filter by size
+  neatfolder                                # Preview organization, then ask for confirmation
+  neatfolder --dry-run                      # Preview only (no confirmation prompt)
+  neatfolder --no-dry-run                   # Organize without confirmation prompt
+  neatfolder ~/Downloads                    # Preview Downloads folder, then ask for confirmation
+  neatfolder ~/Downloads --no-dry-run       # Organize Downloads folder without confirmation
+  neatfolder ~/Documents -m name            # Preview organize by name, then confirm
+  neatfolder . --min-size 1MB --max-size 100MB  # Filter by size, preview and confirm
   neatfolder . --undo                       # Undo last operation
-  neatfolder . --undo 123                   # Undo specific operation ID
-  neatfolder . --redo 456                   # Redo operation that was undone
-  neatfolder . --history 10                 # Show last 10 operations
   neatfolder . --stats                      # Show database statistics
-  neatfolder . --show-structure 789         # Show folder structure comparison
+
+Quick Commands:
+  neatfolder                                # Interactive organize current directory
+  neatfolder ~/Downloads                    # Interactive organize Downloads folder
+  neatfolder --no-dry-run                   # Organize current directory without confirmation
+  neatfolder --undo                         # Undo last operation
+  neatfolder --stats                        # Show statistics
   `);
   process.exit(0);
 };
@@ -128,7 +155,7 @@ const parseArguments = (): ParsedArguments => {
         recursive: {
           type: "boolean",
           short: "r",
-          default: false,
+          default: true,
         },
         "max-depth": {
           type: "string",
@@ -151,9 +178,18 @@ const parseArguments = (): ParsedArguments => {
           type: "boolean",
           default: false,
         },
+        "no-dry-run": {
+          type: "boolean",
+          default: false,
+        },
         verbose: {
           type: "boolean",
           short: "v",
+          default: true,
+        },
+        quiet: {
+          type: "boolean",
+          short: "q",
           default: false,
         },
         help: {
@@ -171,7 +207,7 @@ const parseArguments = (): ParsedArguments => {
           default: undefined,
         },
         history: {
-          type: "boolean", 
+          type: "boolean",
           default: false,
         },
         stats: {
@@ -221,6 +257,12 @@ const parseArguments = (): ParsedArguments => {
       throw new Error("min-size cannot be greater than max-size");
     }
 
+    // Handle dry-run vs no-dry-run logic
+    const dryRun = values["no-dry-run"] ? false : Boolean(values["dry-run"]);
+
+    // Handle verbose vs quiet logic
+    const verbose = values.quiet ? false : Boolean(values.verbose);
+
     return {
       directory,
       method,
@@ -229,17 +271,28 @@ const parseArguments = (): ParsedArguments => {
       minSize,
       maxSize,
       ignoreDotfiles: Boolean(values["ignore-dotfiles"]),
-      dryRun: Boolean(values["dry-run"]),
-      verbose: Boolean(values.verbose),
+      dryRun,
+      verbose,
+      quiet: Boolean(values.quiet),
+      noDryRun: Boolean(values["no-dry-run"]),
       // Database operations
       undo: Boolean(values.undo),
-      redo: typeof values.redo === 'string' ? values.redo : undefined,
+      redo: typeof values.redo === "string" ? values.redo : undefined,
       history: Boolean(values.history),
       stats: Boolean(values.stats),
-      showStructure: typeof values["show-structure"] === 'string' ? values["show-structure"] : undefined,
+      showStructure:
+        typeof values["show-structure"] === "string"
+          ? values["show-structure"]
+          : undefined,
       clearHistory: Boolean(values["clear-history"]),
-      exportHistory: typeof values["export-history"] === 'string' ? values["export-history"] : undefined,
-      databasePath: typeof values["database-path"] === 'string' ? values["database-path"] : undefined,
+      exportHistory:
+        typeof values["export-history"] === "string"
+          ? values["export-history"]
+          : undefined,
+      databasePath:
+        typeof values["database-path"] === "string"
+          ? values["database-path"]
+          : undefined,
     };
   } catch (error: any) {
     console.error(`Error parsing arguments: ${error.message}`);
@@ -320,14 +373,53 @@ const main = async () => {
     if (cmdOptions.exportHistory) {
       isDatabaseOperation = true;
       await organizer.exportHistory(cmdOptions.exportHistory);
-      console.log(`\x1b[32m✅ History exported to ${cmdOptions.exportHistory}\x1b[0m`);
+      console.log(
+        `\x1b[32m✅ History exported to ${cmdOptions.exportHistory}\x1b[0m`
+      );
     }
 
     // If no database operations, perform normal organization
     if (!isDatabaseOperation) {
-      await organizer.organize(cmdOptions.directory);
-    }
+      // First, always do a dry run to show the preview
+      const previewOptions: OrganizationOptions = {
+        ...options,
+        dryRun: true,
+      };
 
+      const previewOrganizer = new NeatFolder(
+        previewOptions,
+        cmdOptions.databasePath
+      );
+      console.log("📋 Previewing organization...\n");
+      await previewOrganizer.organize(cmdOptions.directory);
+      previewOrganizer.closeDatabase();
+
+      // If dry-run was explicitly requested, stop here
+      if (cmdOptions.dryRun) {
+        return;
+      }
+
+      // If --no-dry-run was specified, skip confirmation and proceed
+      if (cmdOptions.noDryRun) {
+        console.log(
+          "\n🚀 Proceeding with file organization (--no-dry-run specified)...\n"
+        );
+        await organizer.organize(cmdOptions.directory);
+      } else {
+        // Ask for confirmation
+        console.log("\n" + "─".repeat(60));
+        const shouldProceed = await askForConfirmation(
+          "Do you want to proceed with moving the files as shown above?"
+        );
+
+        if (shouldProceed) {
+          console.log("\n🚀 Proceeding with file organization...\n");
+          await organizer.organize(cmdOptions.directory);
+        } else {
+          console.log("\n❌ Operation cancelled. No files were moved.");
+        }
+      }
+    }
   } catch (error: any) {
     console.error(`\x1b[31m❌ Fatal error: ${error.message}\x1b[0m`);
     process.exit(1);

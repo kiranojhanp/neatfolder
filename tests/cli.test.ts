@@ -259,7 +259,7 @@ describe("CLI Interface", () => {
       writeFileSync(join(testDir, "text.txt"), "text content");
 
       try {
-        await runCLI([testDir]);
+        await runCLI([testDir, "--no-dry-run"]);
 
         // Verify files were organized
         expect(existsSync(join(testDir, "documents", "document.pdf"))).toBe(
