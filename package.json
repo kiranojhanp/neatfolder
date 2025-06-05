@@ -29,7 +29,8 @@
   "scripts": {
     "build": "tsup",
     "release": "bumpp --commit --push --tag && npm publish",
-    "start": "bun ./dist/index.js"
+    "start": "bun ./dist/index.js",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "1.1.18",

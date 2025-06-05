@@ -212,14 +212,34 @@ export class NeatFolder {
   /**
    * Builds a directory structure map from file paths
    * @param filePaths Array of file paths
+   * @param basePath Base directory to make paths relative to
    * @returns Map of directories to their files
    */
-  private buildDirectoryStructure(filePaths: string[]): DirectoryMap {
+  private buildDirectoryStructure(
+    filePaths: string[],
+    basePath?: string
+  ): DirectoryMap {
     const structure: DirectoryMap = new Map();
 
     for (const filePath of filePaths) {
-      const dir = filePath.substring(0, filePath.lastIndexOf("/"));
+      let dir = filePath.substring(0, filePath.lastIndexOf("/"));
       const fileName = filePath.split("/").pop()!;
+
+      // Make the directory path relative to the base path if provided
+      if (basePath) {
+        if (dir === basePath) {
+          // If the file is in the root directory, use just the directory name
+          dir = basePath.split("/").pop()!;
+        } else if (dir.startsWith(basePath + "/")) {
+          // Strip the base path and keep the relative structure, but prepend base dir name
+          const baseDir = basePath.split("/").pop()!;
+          const relativePath = dir.substring(basePath.length + 1);
+          dir = `${baseDir}/${relativePath}`;
+        } else {
+          // Fallback - use just the directory name
+          dir = basePath.split("/").pop()!;
+        }
+      }
 
       // Create a set for this directory if it doesn't exist
       if (!structure.has(dir)) {
@@ -270,7 +290,10 @@ export class NeatFolder {
     const allFiles = await this.findFiles(resolvedPath);
 
     // Build initial directory structure for comparison
-    const initialStructure = this.buildDirectoryStructure(allFiles);
+    const initialStructure = this.buildDirectoryStructure(
+      allFiles,
+      resolvedPath
+    );
 
     // Process files to get mappings
     const fileMappings = await this.createFileMappings(allFiles, resolvedPath);

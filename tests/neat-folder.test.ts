@@ -283,7 +283,10 @@ describe("NeatFolder", () => {
         "code/script.js",
       ];
 
-      const dirMap = (neatFolder as any).buildDirectoryStructure(filePaths);
+      const dirMap = (neatFolder as any).buildDirectoryStructure(
+        filePaths,
+        undefined
+      );
 
       expect(dirMap.has("images")).toBe(true);
       expect(dirMap.has("documents")).toBe(true);
