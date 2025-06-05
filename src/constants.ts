@@ -10,8 +10,16 @@ export const FILE_CATEGORIES = new Map([
 ]);
 
 export const TREE_SYMBOLS = {
-  BRANCH: "├── ",
-  LAST_BRANCH: "└── ",
-  VERTICAL: "│ ",
-  INDENT: " ",
+  ANSI: {
+    BRANCH: "├── ",
+    LAST_BRANCH: "└── ",
+    VERTICAL: "│ ",
+    INDENT: "  ",
+  },
+  ASCII: {
+    BRANCH: "|-- ",
+    LAST_BRANCH: "`-- ",
+    VERTICAL: "|   ",
+    INDENT: "    ",
+  },
 } as const;

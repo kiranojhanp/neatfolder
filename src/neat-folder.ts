@@ -2,6 +2,7 @@ import { resolve } from "path";
 import { Glob } from "bun";
 import { $ } from "bun";
 import { FILE_CATEGORIES, TREE_SYMBOLS } from "./constants";
+import { DatabaseLogger } from "./database-logger";
 import type {
   FileMapping,
   OrganizationOptions,
@@ -94,7 +95,11 @@ export class NeatFolder {
     created: new Set<string>(),
   };
 
-  constructor(private readonly options: OrganizationOptions) {}
+  private dbLogger: DatabaseLogger;
+
+  constructor(private readonly options: OrganizationOptions, dbPath?: string) {
+    this.dbLogger = new DatabaseLogger(dbPath);
+  }
 
   private getCategoryFromFile(filename: string): string {
     for (const [pattern, category] of FILE_CATEGORIES) {
@@ -193,17 +198,17 @@ export class NeatFolder {
       );
       const fileName = mapping.targetPath.split("/").pop()!;
 
+      // Always track the structure for database logging
+      if (!dirStructure.has(targetDir)) {
+        dirStructure.set(targetDir, new Set());
+      }
+      dirStructure.get(targetDir)?.add(fileName);
+
       if (!this.options.dryRun) {
         // Create directory and move file using shell
         await $`mkdir -p ${targetDir}`;
         await $`mv ${mapping.sourcePath} ${mapping.targetPath}`;
         this.stats.created.add(targetDir);
-      } else {
-        // For dry run, just track the structure
-        if (!dirStructure.has(targetDir)) {
-          dirStructure.set(targetDir, new Set());
-        }
-        dirStructure.get(targetDir)?.add(fileName);
       }
 
       this.stats.filesProcessed++;
@@ -271,18 +276,20 @@ export class NeatFolder {
       const dirName = dir.split("/").pop() || dir;
       const dirColor = getDirColor(dirName);
       const dirIcon = isLastDir
-        ? TREE_SYMBOLS.LAST_BRANCH
-        : TREE_SYMBOLS.BRANCH;
+        ? TREE_SYMBOLS.ANSI.LAST_BRANCH
+        : TREE_SYMBOLS.ANSI.BRANCH;
       result += `${dirColor(dirIcon + dirName + "/")}\n`;
 
       // Add files with colors
       for (let j = 0; j < files.length; j++) {
         const file = files[j];
         const isLastFile = j === files.length - 1;
-        const prefix = isLastDir ? TREE_SYMBOLS.INDENT : TREE_SYMBOLS.VERTICAL;
+        const prefix = isLastDir
+          ? TREE_SYMBOLS.ANSI.INDENT
+          : TREE_SYMBOLS.ANSI.VERTICAL;
         const connector = isLastFile
-          ? TREE_SYMBOLS.LAST_BRANCH
-          : TREE_SYMBOLS.BRANCH;
+          ? TREE_SYMBOLS.ANSI.LAST_BRANCH
+          : TREE_SYMBOLS.ANSI.BRANCH;
 
         // Color the file based on its extension
         const extension = file.substring(file.lastIndexOf("."));
@@ -363,7 +370,20 @@ export class NeatFolder {
 
     console.log(); // Newline after progress bar
 
+    const duration = (Date.now() - startTime) / 1000;
+
     if (!this.options.dryRun) {
+      // Log the operation to database
+      const operationId = this.dbLogger.logOrganization(
+        resolvedPath,
+        this.options.method,
+        initialStructure,
+        finalRunStructure,
+        fileMappings,
+        this.stats,
+        duration
+      );
+
       console.log(
         colors.success(
           `✅ Organization complete: ${colors.bold(
@@ -381,7 +401,6 @@ export class NeatFolder {
     console.log(); // Extra newline for separation
     console.log(this.generateTree(finalRunStructure, true));
 
-    const duration = (Date.now() - startTime) / 1000;
     this.printSummary(duration);
   }
 
@@ -425,5 +444,38 @@ export class NeatFolder {
         console.log(colors.warning(`  • ${skip}`))
       );
     }
+  }
+
+  // Database-related methods
+  async undo(operationId?: number): Promise<boolean> {
+    return this.dbLogger.undo(operationId);
+  }
+
+  async redo(undoOperationId?: number): Promise<boolean> {
+    return this.dbLogger.redo(undoOperationId);
+  }
+
+  displayHistory(limit: number = 10, directory?: string): void {
+    this.dbLogger.displayHistory(limit, directory);
+  }
+
+  showStructureComparison(operationId: number): void {
+    this.dbLogger.showStructureComparison(operationId);
+  }
+
+  displayStats(): void {
+    this.dbLogger.displayStats();
+  }
+
+  async clearHistory(): Promise<void> {
+    await this.dbLogger.clearHistory();
+  }
+
+  async exportHistory(filePath: string): Promise<void> {
+    await this.dbLogger.exportHistory(filePath);
+  }
+
+  closeDatabase(): void {
+    this.dbLogger.close();
   }
 }

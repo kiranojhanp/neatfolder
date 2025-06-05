@@ -15,6 +15,15 @@ interface ParsedArguments {
   ignoreDotfiles: boolean;
   dryRun: boolean;
   verbose: boolean;
+  // Database operations
+  undo: boolean;
+  redo?: string;
+  history: boolean;
+  stats: boolean;
+  showStructure?: string;
+  clearHistory: boolean;
+  exportHistory?: string;
+  databasePath?: string;
 }
 
 // Utility function to parse size strings (e.g., "1MB", "500KB", "2GB")
@@ -78,13 +87,29 @@ Options:
   --ignore-dotfiles       Skip hidden files
   --dry-run               Preview changes without moving files
   -v, --verbose           Show detailed output
+  --database-path <path>  Custom database file path
   -h, --help              Show this help message
+
+Database Operations:
+  --undo [operationId]    Undo the last operation or specific operation ID
+  --redo <undoOperationId> Redo a previously undone operation
+  --history [limit]       Show operation history (optional limit)
+  --stats                 Show database statistics
+  --show-structure <id>   Show before/after folder structure for operation
+  --clear-history         Clear all operation history
+  --export-history <file> Export history to JSON file
 
 Examples:
   neatfolder ~/Downloads                    # Organize by file extension
   neatfolder ~/Documents -m name -r         # Organize by name, recursive
   neatfolder . --dry-run                    # Preview organization
   neatfolder . --min-size 1MB --max-size 100MB  # Filter by size
+  neatfolder . --undo                       # Undo last operation
+  neatfolder . --undo 123                   # Undo specific operation ID
+  neatfolder . --redo 456                   # Redo operation that was undone
+  neatfolder . --history 10                 # Show last 10 operations
+  neatfolder . --stats                      # Show database statistics
+  neatfolder . --show-structure 789         # Show folder structure comparison
   `);
   process.exit(0);
 };
@@ -136,6 +161,39 @@ const parseArguments = (): ParsedArguments => {
           short: "h",
           default: false,
         },
+        // Database operations
+        undo: {
+          type: "boolean",
+          default: false,
+        },
+        redo: {
+          type: "string",
+          default: undefined,
+        },
+        history: {
+          type: "boolean", 
+          default: false,
+        },
+        stats: {
+          type: "boolean",
+          default: false,
+        },
+        "show-structure": {
+          type: "string",
+          default: undefined,
+        },
+        "clear-history": {
+          type: "boolean",
+          default: false,
+        },
+        "export-history": {
+          type: "string",
+          default: undefined,
+        },
+        "database-path": {
+          type: "string",
+          default: undefined,
+        },
       },
       strict: false,
       allowPositionals: true,
@@ -173,6 +231,15 @@ const parseArguments = (): ParsedArguments => {
       ignoreDotfiles: Boolean(values["ignore-dotfiles"]),
       dryRun: Boolean(values["dry-run"]),
       verbose: Boolean(values.verbose),
+      // Database operations
+      undo: Boolean(values.undo),
+      redo: typeof values.redo === 'string' ? values.redo : undefined,
+      history: Boolean(values.history),
+      stats: Boolean(values.stats),
+      showStructure: typeof values["show-structure"] === 'string' ? values["show-structure"] : undefined,
+      clearHistory: Boolean(values["clear-history"]),
+      exportHistory: typeof values["export-history"] === 'string' ? values["export-history"] : undefined,
+      databasePath: typeof values["database-path"] === 'string' ? values["database-path"] : undefined,
     };
   } catch (error: any) {
     console.error(`Error parsing arguments: ${error.message}`);
@@ -196,10 +263,73 @@ const main = async () => {
       verbose: cmdOptions.verbose,
     };
 
-    const organizer = new NeatFolder(options);
-    await organizer.organize(cmdOptions.directory);
+    // Create organizer with optional database path
+    const organizer = new NeatFolder(options, cmdOptions.databasePath);
+
+    // Handle database operations first
+    let isDatabaseOperation = false;
+
+    // Handle undo operation
+    if (cmdOptions.undo) {
+      isDatabaseOperation = true;
+      // For boolean undo, just undo the last operation
+      await organizer.undo();
+    }
+
+    // Handle redo operation
+    if (cmdOptions.redo) {
+      isDatabaseOperation = true;
+      const undoOperationId = parseInt(cmdOptions.redo, 10);
+      if (isNaN(undoOperationId)) {
+        throw new Error(`Invalid undo operation ID: ${cmdOptions.redo}`);
+      }
+      await organizer.redo(undoOperationId);
+    }
+
+    // Handle history display
+    if (cmdOptions.history) {
+      isDatabaseOperation = true;
+      // Show all history since we're using boolean
+      await organizer.displayHistory();
+    }
+
+    // Handle stats display
+    if (cmdOptions.stats) {
+      isDatabaseOperation = true;
+      await organizer.displayStats();
+    }
+
+    // Handle structure comparison
+    if (cmdOptions.showStructure) {
+      isDatabaseOperation = true;
+      const operationId = parseInt(cmdOptions.showStructure, 10);
+      if (isNaN(operationId)) {
+        throw new Error(`Invalid operation ID: ${cmdOptions.showStructure}`);
+      }
+      await organizer.showStructureComparison(operationId);
+    }
+
+    // Handle clear history
+    if (cmdOptions.clearHistory) {
+      isDatabaseOperation = true;
+      await organizer.clearHistory();
+      console.log("\x1b[32m✅ Operation history cleared successfully\x1b[0m");
+    }
+
+    // Handle export history
+    if (cmdOptions.exportHistory) {
+      isDatabaseOperation = true;
+      await organizer.exportHistory(cmdOptions.exportHistory);
+      console.log(`\x1b[32m✅ History exported to ${cmdOptions.exportHistory}\x1b[0m`);
+    }
+
+    // If no database operations, perform normal organization
+    if (!isDatabaseOperation) {
+      await organizer.organize(cmdOptions.directory);
+    }
+
   } catch (error: any) {
-    console.error(`Fatal error: ${error.message}`);
+    console.error(`\x1b[31m❌ Fatal error: ${error.message}\x1b[0m`);
     process.exit(1);
   }
 };
