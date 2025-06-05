@@ -429,18 +429,18 @@ export class NeatFolder {
     structure: DirectoryMap,
     totalFiles: number
   ): Promise<void> {
-    // Process files with progress bar
+    // Start spinner animation
+    this.progressService.startSpinner(
+      `🚀 Starting file organization for ${totalFiles} files`
+    );
+
+    // Process files
     for (let i = 0; i < mappings.length; i++) {
       await this.moveFile(mappings[i], structure);
-
-      // Update and display progress
-      const progress = ((i + 1) / totalFiles) * 100;
-      process.stdout.write(
-        `\r${this.progressService.drawProgressBar(progress)}`
-      );
     }
 
-    console.log(); // Newline after progress bar
+    // Stop spinner when done
+    this.progressService.stopSpinner();
   }
 
   /**

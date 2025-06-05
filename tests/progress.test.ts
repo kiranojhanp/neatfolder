@@ -38,77 +38,78 @@ describe("ProgressService", () => {
     consoleSpy.error.mockRestore();
   });
 
-  describe("Progress Bar", () => {
-    test("should generate progress bar at 0%", () => {
-      const progressBar = progressService.drawProgressBar(0);
+  describe("Spinner", () => {
+    test("should start spinner with default message", () => {
+      const writeSpy = spyOn(process.stdout, "write").mockImplementation(
+        () => true
+      );
 
-      expect(progressBar).toContain("[");
-      expect(progressBar).toContain("]");
-      expect(progressBar).toContain("0.00%");
-      expect(progressBar).toContain("▒".repeat(30)); // All empty
+      progressService.startSpinner();
+
+      expect(writeSpy).toHaveBeenCalledWith(
+        "\r🚀 Starting file organization..."
+      );
+
+      writeSpy.mockRestore();
     });
 
-    test("should generate progress bar at 50%", () => {
+    test("should start spinner with custom message", () => {
+      const writeSpy = spyOn(process.stdout, "write").mockImplementation(
+        () => true
+      );
+
+      progressService.startSpinner("Processing files");
+
+      expect(writeSpy).toHaveBeenCalledWith("\rProcessing files...");
+
+      writeSpy.mockRestore();
+    });
+
+    test("should stop spinner", () => {
+      const writeSpy = spyOn(process.stdout, "write").mockImplementation(
+        () => true
+      );
+
+      progressService.startSpinner();
+      progressService.stopSpinner();
+
+      expect(writeSpy).toHaveBeenCalledWith("\n");
+
+      writeSpy.mockRestore();
+    });
+
+    test("should stop spinner with final message", () => {
+      const writeSpy = spyOn(process.stdout, "write").mockImplementation(
+        () => true
+      );
+
+      progressService.startSpinner();
+      progressService.stopSpinner("✅ Complete!");
+
+      expect(writeSpy).toHaveBeenCalledWith("\r✅ Complete!\n");
+
+      writeSpy.mockRestore();
+    });
+
+    test("should not start multiple spinners", () => {
+      const writeSpy = spyOn(process.stdout, "write").mockImplementation(
+        () => true
+      );
+
+      progressService.startSpinner("First");
+      progressService.startSpinner("Second");
+
+      // Should only have been called once for the first spinner
+      expect(writeSpy).toHaveBeenCalledTimes(1);
+      expect(writeSpy).toHaveBeenCalledWith("\rFirst...");
+
+      progressService.stopSpinner();
+      writeSpy.mockRestore();
+    });
+
+    test("drawProgressBar should return empty string for backward compatibility", () => {
       const progressBar = progressService.drawProgressBar(50);
-
-      expect(progressBar).toContain("50.00%");
-      expect(progressBar).toContain("█".repeat(15)); // Half filled
-      expect(progressBar).toContain("▒".repeat(15)); // Half empty
-    });
-
-    test("should generate progress bar at 100%", () => {
-      const progressBar = progressService.drawProgressBar(100);
-
-      expect(progressBar).toContain("100.00%");
-      expect(progressBar).toContain("█".repeat(30)); // All filled
-      expect(progressBar).not.toContain("▒"); // No empty bars
-    });
-
-    test("should handle decimal progress values", () => {
-      const progressBar = progressService.drawProgressBar(33.33);
-
-      expect(progressBar).toContain("33.33%");
-      expect(progressBar).toContain("█".repeat(9)); // Floor of 33.33% of 30 = 9
-      expect(progressBar).toContain("▒".repeat(21)); // Remaining empty = 30-9 = 21
-    });
-
-    test("should handle progress values over 100%", () => {
-      const progressBar = progressService.drawProgressBar(150);
-
-      expect(progressBar).toContain("150.00%");
-      expect(progressBar).toContain("█".repeat(30)); // Capped at full bar
-    });
-
-    test("should handle negative progress values", () => {
-      const progressBar = progressService.drawProgressBar(-10);
-
-      expect(progressBar).toContain("-10.00%");
-      expect(progressBar).toContain("▒".repeat(30)); // All empty
-    });
-
-    test("should maintain consistent bar width", () => {
-      const progressValues = [0, 25, 50, 75, 100];
-
-      for (const progress of progressValues) {
-        const progressBar = progressService.drawProgressBar(progress);
-        const strippedBar = stripAnsiCodes(progressBar);
-        const barContent = strippedBar.match(/\[(.*?)\]/)?.[1];
-
-        expect(barContent).toBeDefined();
-        expect(barContent!.length).toBe(30);
-      }
-    });
-
-    test("should format percentage with two decimal places", () => {
-      const testValues = [0, 1.5, 33.333, 66.666, 99.999];
-
-      for (const value of testValues) {
-        const progressBar = progressService.drawProgressBar(value);
-        const percentageMatch = progressBar.match(/(\d+\.\d{2})%/);
-
-        expect(percentageMatch).toBeDefined();
-        expect(percentageMatch![1]).toBe(value.toFixed(2));
-      }
+      expect(progressBar).toBe("");
     });
   });
 
@@ -262,16 +263,12 @@ describe("ProgressService", () => {
     });
 
     test("should handle fractional progress values correctly", () => {
+      // drawProgressBar now returns empty string for backward compatibility
       const fractionalValues = [0.1, 0.5, 0.9, 1.1, 99.9];
 
       for (const value of fractionalValues) {
         const progressBar = progressService.drawProgressBar(value);
-
-        expect(progressBar).toContain(`${value.toFixed(2)}%`);
-        // Check that bar has correct structure without unicode regex
-        expect(progressBar).toContain("[");
-        expect(progressBar).toContain("]");
-        expect(progressBar.match(/\[(.{30})\]/)).toBeTruthy();
+        expect(progressBar).toBe("");
       }
     });
 
@@ -319,17 +316,14 @@ describe("ProgressService", () => {
         progressService.drawProgressBar(step)
       );
 
-      // All should have same format (after stripping ANSI codes)
+      // All progress bars should return empty string for backward compatibility
       for (const bar of progressBars) {
-        const strippedBar = stripAnsiCodes(bar);
-        expect(strippedBar).toMatch(/^\[.{30}\] \d+\.\d{2}%$/);
+        expect(bar).toBe("");
       }
 
-      // Progress should be visually increasing
+      // All should be consistent (empty strings)
       for (let i = 1; i < progressBars.length; i++) {
-        const prevFilledCount = (progressBars[i - 1].match(/█/g) || []).length;
-        const currentFilledCount = (progressBars[i].match(/█/g) || []).length;
-        expect(currentFilledCount).toBeGreaterThanOrEqual(prevFilledCount);
+        expect(progressBars[i]).toBe(progressBars[i - 1]);
       }
     });
   });

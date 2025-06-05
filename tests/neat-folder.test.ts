@@ -329,8 +329,8 @@ describe("NeatFolder", () => {
     test("should generate progress bar", () => {
       const progressBar = (neatFolder as any).drawProgressBar(50);
 
-      expect(progressBar).toContain("█");
-      expect(progressBar).toContain("50.00%");
+      // Progress bar now returns empty string for backward compatibility
+      expect(progressBar).toBe("");
     });
   });
 

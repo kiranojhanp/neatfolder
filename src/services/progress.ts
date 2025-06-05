@@ -6,62 +6,75 @@ import { formatSize } from "../utils/file-utils";
  * ProgressService handles progress visualization and summary reporting
  */
 export class ProgressService {
-  // Bar width in characters for the progress bar
-  private readonly barWidth: number;
-
-  // Progress threshold percentages for coloring
-  private static readonly PROGRESS_THRESHOLDS = {
-    WARNING: 30, // Below this is warning color
-    INFO: 70, // Below this is info color, above is success
+  // Spinner configuration
+  private static readonly SPINNER = {
+    interval: 80,
+    frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
   };
 
-  // Characters for filled and empty portions of the bar
-  private static readonly BAR_CHARS = {
-    FILLED: "█",
-    EMPTY: "▒",
-  };
+  // Spinner state
+  private spinnerIndex = 0;
+  private spinnerInterval?: Timer;
+  private isSpinning = false;
 
   /**
    * Creates a new ProgressService instance
-   * @param barWidth Width of the progress bar in characters (default: 30)
    */
-  constructor(barWidth: number = 30) {
-    // Allow the bar width to be configurable
-    this.barWidth = barWidth;
+  constructor() {
+    // No configuration needed for minimal spinner
   }
 
   /**
-   * Creates a visual progress bar
+   * Starts the minimal spinner animation
+   * @param message Message to display with the spinner
+   */
+  startSpinner(message: string = "🚀 Starting file organization"): void {
+    if (this.isSpinning) return;
+
+    this.isSpinning = true;
+    this.spinnerIndex = 0;
+
+    // Clear any existing content and show initial message
+    process.stdout.write(`\r${message}...`);
+
+    this.spinnerInterval = setInterval(() => {
+      const frame = ProgressService.SPINNER.frames[this.spinnerIndex];
+      process.stdout.write(`\r${frame} ${message}...`);
+      this.spinnerIndex =
+        (this.spinnerIndex + 1) % ProgressService.SPINNER.frames.length;
+    }, ProgressService.SPINNER.interval);
+  }
+
+  /**
+   * Stops the spinner animation
+   * @param finalMessage Optional final message to display
+   */
+  stopSpinner(finalMessage?: string): void {
+    if (!this.isSpinning) return;
+
+    this.isSpinning = false;
+
+    if (this.spinnerInterval) {
+      clearInterval(this.spinnerInterval);
+      this.spinnerInterval = undefined;
+    }
+
+    if (finalMessage) {
+      process.stdout.write(`\r${finalMessage}\n`);
+    } else {
+      process.stdout.write("\n");
+    }
+  }
+
+  /**
+   * Creates a visual progress bar (legacy method for backward compatibility)
    * @param progress Progress percentage (0-100)
-   * @returns Formatted progress bar string
+   * @returns Empty string (spinner handles display now)
    */
   drawProgressBar(progress: number): string {
-    // Clamp progress to 0-100 range for calculation, but preserve original for display
-    const clampedProgress = Math.max(0, Math.min(100, progress));
-
-    // Calculate filled and empty portions
-    const filledWidth = Math.floor((clampedProgress / 100) * this.barWidth);
-    const emptyWidth = this.barWidth - filledWidth;
-
-    // Create the visual bar with exactly this.barWidth characters
-    const progressBar =
-      ProgressService.BAR_CHARS.FILLED.repeat(filledWidth) +
-      ProgressService.BAR_CHARS.EMPTY.repeat(emptyWidth);
-
-    // Format percentage with consistent decimals (use original progress value)
-    const formattedPercentage = progress.toFixed(2) + "%";
-
-    // Create the complete bar string
-    const barString = `[${progressBar}] ${formattedPercentage}`;
-
-    // Apply color based on progress thresholds
-    if (progress < ProgressService.PROGRESS_THRESHOLDS.WARNING) {
-      return colors.warning(barString);
-    } else if (progress < ProgressService.PROGRESS_THRESHOLDS.INFO) {
-      return colors.info(barString);
-    } else {
-      return colors.success(barString);
-    }
+    // For backward compatibility, return empty string
+    // Actual progress is now handled by the spinner
+    return "";
   }
 
   /**
