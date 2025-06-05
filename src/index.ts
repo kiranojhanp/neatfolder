@@ -1,15 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { NeatFolder } from "./neat-folder";
-import { FILE_CATEGORIES } from "./constants";
-import { ProgressService } from "./services/progress";
-import { FileSystemService } from "./services/fsystem";
-import { FileCategorizationService } from "./services/fcategorize";
-
 import type { OrganizationOptions } from "./types";
 
+// Simple argument parser using Bun's built-in utilities
 const parseArguments = () => {
-  const args = process.argv.slice(2);
+  const args = Bun.argv.slice(2); // Bun.argv instead of process.argv
   const options: { [key: string]: any } = {
     directory: ".",
     method: "extension",
@@ -53,6 +49,31 @@ const parseArguments = () => {
       case "--verbose":
         options.verbose = true;
         break;
+      case "-h":
+      case "--help":
+        console.log(`
+NeatFolder - Organize files by type, name, date, or size
+
+Usage: neatfolder [directory] [options]
+
+Options:
+  -m, --method <type>     Organization method: extension|name|date|size (default: extension)
+  -r, --recursive         Include subdirectories
+  -d, --max-depth <n>     Maximum directory depth (default: 5)
+  --min-size <bytes>      Minimum file size filter
+  --max-size <bytes>      Maximum file size filter
+  --ignore-dotfiles       Skip hidden files
+  --dry-run               Preview changes without moving files
+  -v, --verbose           Show detailed output
+  -h, --help              Show this help message
+
+Examples:
+  neatfolder ~/Downloads                    # Organize by file extension
+  neatfolder ~/Documents -m name -r         # Organize by name, recursive
+  neatfolder . --dry-run                    # Preview organization
+        `);
+        process.exit(0);
+        break;
       default:
         if (!arg.startsWith("-")) {
           options.directory = arg;
@@ -71,11 +92,12 @@ const main = async () => {
 
   try {
     const validMethods = ["extension", "name", "date", "size"];
-    if (
-      !validMethods.includes(cmdOptions.method) &&
-      cmdOptions.method !== undefined
-    ) {
-      throw new Error(`Invalid method: ${cmdOptions.method}`);
+    if (!validMethods.includes(cmdOptions.method)) {
+      throw new Error(
+        `Invalid method: ${
+          cmdOptions.method
+        }. Valid options: ${validMethods.join(", ")}`
+      );
     }
 
     const options: OrganizationOptions = {
@@ -89,16 +111,22 @@ const main = async () => {
       verbose: cmdOptions.verbose,
     };
 
-    const fs = new FileSystemService();
-    const categorizer = new FileCategorizationService(FILE_CATEGORIES);
-    const progress = new ProgressService();
-    const organizer = new NeatFolder(options, fs, categorizer, progress);
-
+    const organizer = new NeatFolder(options);
     await organizer.organize(cmdOptions.directory);
   } catch (error: any) {
-    console.error("Fatal error:", error.message);
+    console.error(`Fatal error: ${error.message}`);
     process.exit(1);
   }
 };
 
-main();
+// Handle unhandled rejections
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  process.exit(1);
+});
+
+// Run main function
+main().catch((error) => {
+  console.error("Fatal error:", error.message);
+  process.exit(1);
+});

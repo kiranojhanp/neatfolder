@@ -1,17 +1,12 @@
-import { cpus } from "os";
 import { resolve } from "path";
-import { readdir } from "fs/promises";
-
-import { ANSI_STYLES } from "./constants";
-import { TreeService } from "./services/tree";
-import { ProgressService } from "./services/progress";
-import { FileSystemService } from "./services/fsystem";
-import { FileCategorizationService } from "./services/fcategorize";
-
+import { Glob } from "bun";
+import { $ } from "bun";
+import { FILE_CATEGORIES, TREE_SYMBOLS } from "./constants";
 import type {
   FileMapping,
   OrganizationOptions,
   OrganizationStats,
+  DirectoryMap,
 } from "./types";
 
 export class NeatFolder {
@@ -23,25 +18,40 @@ export class NeatFolder {
     created: new Set<string>(),
   };
 
-  constructor(
-    private readonly options: OrganizationOptions,
-    private readonly fs: FileSystemService,
-    private readonly categorizer: FileCategorizationService,
-    private readonly progress: ProgressService
-  ) {}
+  constructor(private readonly options: OrganizationOptions) {}
 
-  private async *walkDirectory(dir: string, depth = 0): AsyncGenerator<string> {
-    if (this.options.maxDepth && depth > this.options.maxDepth) return;
-
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const path = this.fs.joinPaths(dir, entry.name);
-      if (entry.isDirectory() && this.options.recursive) {
-        yield* this.walkDirectory(path, depth + 1);
-      } else if (entry.isFile()) {
-        yield path;
+  private getCategoryFromFile(filename: string): string {
+    for (const [pattern, category] of FILE_CATEGORIES) {
+      if (pattern.test(filename)) {
+        return category;
       }
     }
+    return "others";
+  }
+
+  private getTargetDirectory(
+    file: string,
+    stats: { size: number; mtime: Date }
+  ): string {
+    let dir = this.getCategoryFromFile(file);
+
+    switch (this.options.method) {
+      case "date":
+        const date = stats.mtime;
+        dir += `/${date.getFullYear()}/${(date.getMonth() + 1)
+          .toString()
+          .padStart(2, "0")}`;
+        break;
+      case "size":
+        if (stats.size < 1024 * 1024) dir = "small";
+        else if (stats.size < 100 * 1024 * 1024) dir = "medium";
+        else dir = "large";
+        break;
+      case "name":
+        dir = file.charAt(0).toLowerCase();
+        break;
+    }
+    return dir;
   }
 
   private async processFile(
@@ -49,61 +59,71 @@ export class NeatFolder {
     basePath: string
   ): Promise<FileMapping | null> {
     try {
-      const stats = await this.fs.getFileStats(filePath);
-      if (!stats.isFile()) return null;
+      const file = Bun.file(filePath);
+      const stats = await file.exists();
+      if (!stats) return null;
 
-      if (this.options.minSize && stats.size < this.options.minSize) {
+      const size = file.size;
+      if (this.options.minSize && size < this.options.minSize) {
         this.stats.skipped.push(`Size too small: ${filePath}`);
         return null;
       }
 
-      if (this.options.maxSize && stats.size > this.options.maxSize) {
+      if (this.options.maxSize && size > this.options.maxSize) {
         this.stats.skipped.push(`Size too large: ${filePath}`);
         return null;
       }
 
-      const fileName = this.fs.getBasename(filePath);
+      const fileName = filePath.split("/").pop()!;
       if (this.options.ignoreDotfiles && fileName.startsWith(".")) {
         this.stats.skipped.push(`Dotfile ignored: ${filePath}`);
         return null;
       }
 
-      const targetDir = this.categorizer.getTargetDirectory(
-        fileName,
-        stats,
-        this.options.method
-      );
-      const targetPath = this.fs.joinPaths(basePath, targetDir, fileName);
+      // Get file modification time using shell
+      const statResult = await $`stat -f "%m" ${filePath}`.text();
+      const modifiedTime = new Date(parseInt(statResult.trim()) * 1000);
+
+      const targetDir = this.getTargetDirectory(fileName, {
+        size,
+        mtime: modifiedTime,
+      });
+      const targetPath = `${basePath}/${targetDir}/${fileName}`;
 
       return {
         sourcePath: filePath,
         targetPath,
-        size: stats.size,
-        modifiedTime: stats.mtime,
+        size,
+        modifiedTime,
       };
     } catch (error) {
-      if (error instanceof Error) {
-        this.stats.errors.push(
-          `Failed to process ${filePath}: ${error.message}`
-        );
-      }
+      this.stats.errors.push(
+        `Failed to process ${filePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
       return null;
     }
   }
 
   private async moveFile(
     mapping: FileMapping,
-    dirStructure: Map<string, Set<string>>
+    dirStructure: DirectoryMap
   ): Promise<void> {
     try {
-      const targetDir = this.fs.getDirname(mapping.targetPath);
-      const fileName = this.fs.getBasename(mapping.targetPath);
+      const targetDir = mapping.targetPath.substring(
+        0,
+        mapping.targetPath.lastIndexOf("/")
+      );
+      const fileName = mapping.targetPath.split("/").pop()!;
 
       if (!this.options.dryRun) {
-        await this.fs.createDirectory(targetDir);
+        // Create directory and move file using shell
+        await $`mkdir -p ${targetDir}`;
+        await $`mv ${mapping.sourcePath} ${mapping.targetPath}`;
         this.stats.created.add(targetDir);
-        await this.fs.moveFile(mapping.sourcePath, mapping.targetPath);
       } else {
+        // For dry run, just track the structure
         if (!dirStructure.has(targetDir)) {
           dirStructure.set(targetDir, new Set());
         }
@@ -113,84 +133,163 @@ export class NeatFolder {
       this.stats.filesProcessed++;
       this.stats.bytesMoved += mapping.size;
     } catch (error) {
-      if (error instanceof Error) {
-        this.stats.errors.push(
-          `Failed to move ${mapping.sourcePath}: ${error.message}`
-        );
+      this.stats.errors.push(
+        `Failed to move ${mapping.sourcePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  private drawProgressBar(progress: number): string {
+    const barWidth = 30;
+    const filledWidth = Math.floor((progress / 100) * barWidth);
+    const emptyWidth = barWidth - filledWidth;
+    const progressBar = "█".repeat(filledWidth) + "▒".repeat(emptyWidth);
+    return `[${progressBar}] ${progress.toFixed(2)}%`;
+  }
+
+  private buildDirectoryStructure(filePaths: string[]): DirectoryMap {
+    const structure: DirectoryMap = new Map();
+
+    for (const filePath of filePaths) {
+      const dir = filePath.substring(0, filePath.lastIndexOf("/"));
+      const fileName = filePath.split("/").pop()!;
+
+      if (!structure.has(dir)) {
+        structure.set(dir, new Set());
+      }
+      structure.get(dir)?.add(fileName);
+    }
+
+    return structure;
+  }
+
+  private generateTree(dirMap: DirectoryMap): string {
+    let result = "";
+    const sortedDirs = Array.from(dirMap.keys()).sort();
+
+    for (let i = 0; i < sortedDirs.length; i++) {
+      const dir = sortedDirs[i];
+      const files = Array.from(dirMap.get(dir) || []).sort();
+      const isLastDir = i === sortedDirs.length - 1;
+
+      // Add directory name
+      const dirName = dir.split("/").pop() || dir;
+      result += `${
+        isLastDir ? TREE_SYMBOLS.LAST_BRANCH : TREE_SYMBOLS.BRANCH
+      }${dirName}/\n`;
+
+      // Add files
+      for (let j = 0; j < files.length; j++) {
+        const file = files[j];
+        const isLastFile = j === files.length - 1;
+        const prefix = isLastDir ? TREE_SYMBOLS.INDENT : TREE_SYMBOLS.VERTICAL;
+        const connector = isLastFile
+          ? TREE_SYMBOLS.LAST_BRANCH
+          : TREE_SYMBOLS.BRANCH;
+        result += `${prefix}${connector}${file}\n`;
       }
     }
+
+    return result;
   }
 
   public async organize(directory: string): Promise<void> {
     const startTime = Date.now();
     const resolvedPath = resolve(directory);
 
-    if (!(await this.fs.isValidPath(resolvedPath))) {
+    // Check if directory exists using shell
+    try {
+      const result = await $`test -d ${resolvedPath}`.nothrow();
+      if (result.exitCode !== 0) {
+        throw new Error(`Cannot access directory: ${resolvedPath}`);
+      }
+    } catch {
       throw new Error(`Cannot access directory: ${resolvedPath}`);
     }
 
-    // Build initial directory structure
-    const initialStructure = new Map<string, Set<string>>();
-    for await (const filePath of this.walkDirectory(resolvedPath)) {
-      const dir = this.fs.getDirname(filePath);
-      const fileName = this.fs.getBasename(filePath);
+    // Use Bun.Glob for efficient file discovery
+    const pattern = this.options.recursive ? "**/*" : "*";
+    const glob = new Glob(pattern);
 
-      if (!initialStructure.has(dir)) {
-        initialStructure.set(dir, new Set());
-      }
-      initialStructure.get(dir)?.add(fileName);
+    const allFiles: string[] = [];
+    for await (const file of glob.scan({
+      cwd: resolvedPath,
+      onlyFiles: true,
+      dot: !this.options.ignoreDotfiles,
+      absolute: true,
+    })) {
+      allFiles.push(file);
     }
 
+    // Build initial directory structure for dry-run comparison
+    const initialStructure = this.buildDirectoryStructure(allFiles);
+
+    // Process files to get mappings
     const fileMappings: FileMapping[] = [];
-    for await (const filePath of this.walkDirectory(resolvedPath)) {
+    for (const filePath of allFiles) {
       const mapping = await this.processFile(filePath, resolvedPath);
       if (mapping) fileMappings.push(mapping);
     }
 
     const totalFiles = fileMappings.length;
     if (totalFiles === 0) {
-      console.log(
-        `${ANSI_STYLES.CYAN}${ANSI_STYLES.BOLD}No files found to organize in ${directory}${ANSI_STYLES.RESET}`
-      );
+      console.log(`No files found to organize in ${directory}`);
       return;
     }
 
     console.log("Starting file organization...");
-    const finalRunStructure = new Map<string, Set<string>>();
-    const chunkSize = Math.max(1, Math.min(totalFiles, cpus().length * 2));
+    const finalRunStructure: DirectoryMap = new Map();
 
-    for (let i = 0; i < fileMappings.length; i += chunkSize) {
-      const chunk = fileMappings.slice(i, i + chunkSize);
-      for (let idx = 0; idx < chunk.length; idx++) {
-        await this.moveFile(chunk[idx], finalRunStructure);
-        const progress = ((i + idx + 1) / totalFiles) * 100;
-        process.stdout.write(`\r${this.progress.drawProgressBar(progress)}`);
-      }
+    // Process files with progress
+    for (let i = 0; i < fileMappings.length; i++) {
+      await this.moveFile(fileMappings[i], finalRunStructure);
+      const progress = ((i + 1) / totalFiles) * 100;
+      process.stdout.write(`\r${this.drawProgressBar(progress)}`);
     }
 
     console.log(); // Newline after progress bar
 
     if (!this.options.dryRun) {
       console.log(
-        `${ANSI_STYLES.BLUE}${ANSI_STYLES.BOLD}Organization complete: ${this.stats.filesProcessed} files processed.${ANSI_STYLES.RESET}`
+        `Organization complete: ${this.stats.filesProcessed} files processed.`
       );
       return;
     }
 
-    // Print both initial and dry-run trees using the original TreeService
-    console.log(
-      `${ANSI_STYLES.BLUE}${ANSI_STYLES.BOLD}Before:${ANSI_STYLES.RESET}`
-    );
-    const beforeTree = new TreeService(initialStructure);
-    console.log(beforeTree.generate());
+    // Show before/after for dry run
+    console.log("Before:");
+    console.log(this.generateTree(initialStructure));
 
-    console.log(
-      `\n${ANSI_STYLES.GREEN}${ANSI_STYLES.BOLD}After (Dry Run):${ANSI_STYLES.RESET}`
-    );
-    const afterTree = new TreeService(finalRunStructure);
-    console.log(afterTree.generate());
+    console.log("\nAfter (Dry Run):");
+    console.log(this.generateTree(finalRunStructure));
 
     const duration = (Date.now() - startTime) / 1000;
-    this.progress.printSummary(this.stats, duration, this.options.verbose);
+    this.printSummary(duration);
+  }
+
+  private printSummary(duration: number): void {
+    if (!this.options.verbose) return;
+
+    console.log("\nOrganization Summary:");
+    console.log(`Files processed: ${this.stats.filesProcessed}`);
+    console.log(
+      `Total data moved: ${(this.stats.bytesMoved / (1024 * 1024)).toFixed(
+        2
+      )} MB`
+    );
+    console.log(`Time taken: ${duration.toFixed(2)} seconds`);
+    console.log(`Directories created: ${this.stats.created.size}`);
+
+    if (this.stats.errors.length > 0) {
+      console.log("\nErrors encountered:");
+      this.stats.errors.forEach((error) => console.error(`- ${error}`));
+    }
+
+    if (this.stats.skipped.length > 0) {
+      console.log("\nSkipped files:");
+      this.stats.skipped.forEach((skip) => console.log(`- ${skip}`));
+    }
   }
 }
