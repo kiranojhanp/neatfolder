@@ -9,6 +9,82 @@ import type {
   DirectoryMap,
 } from "./types";
 
+// Color utility functions using Bun's built-in color API
+const colors = {
+  success: (text: string) => `${Bun.color("green", "ansi")}${text}\x1b[0m`,
+  warning: (text: string) => `${Bun.color("yellow", "ansi")}${text}\x1b[0m`,
+  error: (text: string) => `${Bun.color("red", "ansi")}${text}\x1b[0m`,
+  info: (text: string) => `${Bun.color("cyan", "ansi")}${text}\x1b[0m`,
+  dim: (text: string) => `${Bun.color("#666666", "ansi")}${text}\x1b[0m`,
+  bold: (text: string) => `\x1b[1m${text}\x1b[0m`,
+
+  // File type colors
+  code: (text: string) => `${Bun.color("#FFA500", "ansi")}${text}\x1b[0m`, // Orange
+  document: (text: string) => `${Bun.color("#4169E1", "ansi")}${text}\x1b[0m`, // Royal Blue
+  image: (text: string) => `${Bun.color("#DA70D6", "ansi")}${text}\x1b[0m`, // Orchid
+  video: (text: string) => `${Bun.color("#00CED1", "ansi")}${text}\x1b[0m`, // Dark Turquoise
+  audio: (text: string) => `${Bun.color("#32CD32", "ansi")}${text}\x1b[0m`, // Lime Green
+  archive: (text: string) => `${Bun.color("#DC143C", "ansi")}${text}\x1b[0m`, // Crimson
+};
+
+// Get color function for file type
+const getFileTypeColor = (extension: string): ((text: string) => string) => {
+  const ext = extension.toLowerCase();
+
+  if (
+    [
+      ".js",
+      ".ts",
+      ".py",
+      ".go",
+      ".rs",
+      ".java",
+      ".cpp",
+      ".c",
+      ".jsx",
+      ".tsx",
+    ].includes(ext)
+  ) {
+    return colors.code;
+  } else if (
+    [".txt", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"].includes(ext)
+  ) {
+    return colors.document;
+  } else if (
+    [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico"].includes(
+      ext
+    )
+  ) {
+    return colors.image;
+  } else if (
+    [".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv"].includes(ext)
+  ) {
+    return colors.video;
+  } else if (
+    [".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"].includes(ext)
+  ) {
+    return colors.audio;
+  } else if (
+    [".zip", ".tar", ".gz", ".rar", ".7z", ".bz2", ".xz"].includes(ext)
+  ) {
+    return colors.archive;
+  }
+
+  return (text: string) => text; // No color for unknown types
+};
+
+// Get directory color based on name
+const getDirColor = (dirName: string): ((text: string) => string) => {
+  const name = dirName.toLowerCase();
+  if (name.includes("code") || name.includes("script")) return colors.code;
+  if (name.includes("doc") || name.includes("text")) return colors.document;
+  if (name.includes("image") || name.includes("photo")) return colors.image;
+  if (name.includes("video") || name.includes("movie")) return colors.video;
+  if (name.includes("audio") || name.includes("music")) return colors.audio;
+  if (name.includes("archive") || name.includes("zip")) return colors.archive;
+  return colors.info;
+};
+
 export class NeatFolder {
   private readonly stats: OrganizationStats = {
     filesProcessed: 0,
@@ -145,8 +221,18 @@ export class NeatFolder {
     const barWidth = 30;
     const filledWidth = Math.floor((progress / 100) * barWidth);
     const emptyWidth = barWidth - filledWidth;
-    const progressBar = "█".repeat(filledWidth) + "▒".repeat(emptyWidth);
-    return `[${progressBar}] ${progress.toFixed(2)}%`;
+
+    const progressBar =
+      colors.success("█".repeat(filledWidth)) +
+      colors.dim("▒".repeat(emptyWidth));
+    const percentText =
+      progress < 50
+        ? colors.warning(`${progress.toFixed(2)}%`)
+        : progress < 100
+        ? colors.info(`${progress.toFixed(2)}%`)
+        : colors.success(`${progress.toFixed(2)}%`);
+
+    return `[${progressBar}] ${percentText}`;
   }
 
   private buildDirectoryStructure(filePaths: string[]): DirectoryMap {
@@ -165,22 +251,31 @@ export class NeatFolder {
     return structure;
   }
 
-  private generateTree(dirMap: DirectoryMap): string {
+  private generateTree(dirMap: DirectoryMap, isPreview = false): string {
     let result = "";
     const sortedDirs = Array.from(dirMap.keys()).sort();
+
+    // Add header with colors
+    if (isPreview) {
+      result += colors.bold(colors.info("After (Dry Run):")) + "\n";
+    } else {
+      result += colors.bold(colors.success("Directory Structure:")) + "\n";
+    }
 
     for (let i = 0; i < sortedDirs.length; i++) {
       const dir = sortedDirs[i];
       const files = Array.from(dirMap.get(dir) || []).sort();
       const isLastDir = i === sortedDirs.length - 1;
 
-      // Add directory name
+      // Add directory name with color
       const dirName = dir.split("/").pop() || dir;
-      result += `${
-        isLastDir ? TREE_SYMBOLS.LAST_BRANCH : TREE_SYMBOLS.BRANCH
-      }${dirName}/\n`;
+      const dirColor = getDirColor(dirName);
+      const dirIcon = isLastDir
+        ? TREE_SYMBOLS.LAST_BRANCH
+        : TREE_SYMBOLS.BRANCH;
+      result += `${dirColor(dirIcon + dirName + "/")}\n`;
 
-      // Add files
+      // Add files with colors
       for (let j = 0; j < files.length; j++) {
         const file = files[j];
         const isLastFile = j === files.length - 1;
@@ -188,7 +283,12 @@ export class NeatFolder {
         const connector = isLastFile
           ? TREE_SYMBOLS.LAST_BRANCH
           : TREE_SYMBOLS.BRANCH;
-        result += `${prefix}${connector}${file}\n`;
+
+        // Color the file based on its extension
+        const extension = file.substring(file.lastIndexOf("."));
+        const fileColor = getFileTypeColor(extension);
+
+        result += `${colors.dim(prefix)}${fileColor(connector + file)}\n`;
       }
     }
 
@@ -203,10 +303,14 @@ export class NeatFolder {
     try {
       const result = await $`test -d ${resolvedPath}`.nothrow();
       if (result.exitCode !== 0) {
-        throw new Error(`Cannot access directory: ${resolvedPath}`);
+        throw new Error(
+          colors.error(`❌ Cannot access directory: ${resolvedPath}`)
+        );
       }
     } catch {
-      throw new Error(`Cannot access directory: ${resolvedPath}`);
+      throw new Error(
+        colors.error(`❌ Cannot access directory: ${resolvedPath}`)
+      );
     }
 
     // Use Bun.Glob for efficient file discovery
@@ -235,11 +339,19 @@ export class NeatFolder {
 
     const totalFiles = fileMappings.length;
     if (totalFiles === 0) {
-      console.log(`No files found to organize in ${directory}`);
+      console.log(
+        colors.warning(`⚠️  No files found to organize in ${directory}`)
+      );
       return;
     }
 
-    console.log("Starting file organization...");
+    console.log(
+      colors.info(
+        `🚀 Starting file organization for ${colors.bold(
+          totalFiles.toString()
+        )} files...`
+      )
+    );
     const finalRunStructure: DirectoryMap = new Map();
 
     // Process files with progress
@@ -253,17 +365,21 @@ export class NeatFolder {
 
     if (!this.options.dryRun) {
       console.log(
-        `Organization complete: ${this.stats.filesProcessed} files processed.`
+        colors.success(
+          `✅ Organization complete: ${colors.bold(
+            this.stats.filesProcessed.toString()
+          )} files processed.`
+        )
       );
       return;
     }
 
     // Show before/after for dry run
-    console.log("Before:");
+    console.log(colors.bold(colors.info("Before:")));
     console.log(this.generateTree(initialStructure));
 
-    console.log("\nAfter (Dry Run):");
-    console.log(this.generateTree(finalRunStructure));
+    console.log(); // Extra newline for separation
+    console.log(this.generateTree(finalRunStructure, true));
 
     const duration = (Date.now() - startTime) / 1000;
     this.printSummary(duration);
@@ -272,24 +388,42 @@ export class NeatFolder {
   private printSummary(duration: number): void {
     if (!this.options.verbose) return;
 
-    console.log("\nOrganization Summary:");
-    console.log(`Files processed: ${this.stats.filesProcessed}`);
+    console.log(colors.bold(colors.info("\n📊 Organization Summary:")));
     console.log(
-      `Total data moved: ${(this.stats.bytesMoved / (1024 * 1024)).toFixed(
-        2
-      )} MB`
+      colors.info(
+        `Files processed: ${colors.bold(this.stats.filesProcessed.toString())}`
+      )
     );
-    console.log(`Time taken: ${duration.toFixed(2)} seconds`);
-    console.log(`Directories created: ${this.stats.created.size}`);
+    console.log(
+      colors.info(
+        `Total data moved: ${colors.bold(
+          (this.stats.bytesMoved / (1024 * 1024)).toFixed(2)
+        )} MB`
+      )
+    );
+    console.log(
+      colors.info(`Time taken: ${colors.bold(duration.toFixed(2))} seconds`)
+    );
+    console.log(
+      colors.info(
+        `Directories created: ${colors.bold(
+          this.stats.created.size.toString()
+        )}`
+      )
+    );
 
     if (this.stats.errors.length > 0) {
-      console.log("\nErrors encountered:");
-      this.stats.errors.forEach((error) => console.error(`- ${error}`));
+      console.log(colors.error("\n❌ Errors encountered:"));
+      this.stats.errors.forEach((error) =>
+        console.log(colors.error(`  • ${error}`))
+      );
     }
 
     if (this.stats.skipped.length > 0) {
-      console.log("\nSkipped files:");
-      this.stats.skipped.forEach((skip) => console.log(`- ${skip}`));
+      console.log(colors.warning("\n⏭️  Skipped files:"));
+      this.stats.skipped.forEach((skip) =>
+        console.log(colors.warning(`  • ${skip}`))
+      );
     }
   }
 }
