@@ -306,15 +306,6 @@ export class NeatFolder {
       return;
     }
 
-    // Start the organization process
-    console.log(
-      colors.info(
-        `🚀 Starting file organization for ${colors.bold(
-          totalFiles.toString()
-        )} files...`
-      )
-    );
-
     // Track the final structure
     const finalRunStructure: DirectoryMap = new Map();
 
