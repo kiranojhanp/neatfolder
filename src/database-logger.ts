@@ -249,6 +249,11 @@ export class DatabaseLogger {
       return false;
     }
 
+    if (this.hasBeenRedone(undoOperation)) {
+      console.log(colors.warning("⚠️  Undo operation has already been redone"));
+      return false;
+    }
+
     const originalOperation = this.getOperationById(
       undoOperation.originalOperationId
     );
@@ -286,6 +291,11 @@ export class DatabaseLogger {
             colors.error(`❌ Failed to redo ${mapping.sourcePath}: ${error}`)
           );
         }
+      }
+
+      if (redoCount === 0) {
+        console.log(colors.warning("⚠️  No files found to redo"));
+        return false;
       }
 
       // Log the redo operation
@@ -452,7 +462,14 @@ export class DatabaseLogger {
       .prepare(
         `
       SELECT COUNT(*) as count FROM organization_history 
-      WHERE isReversed = TRUE AND originalOperationId IS NOT NULL
+      WHERE isReversed = TRUE 
+        AND originalOperationId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM organization_history redos
+          WHERE redos.isReversed = FALSE
+            AND redos.originalOperationId = organization_history.originalOperationId
+            AND redos.id > organization_history.id
+        )
     `
       )
       .get() as { count: number };
@@ -638,13 +655,42 @@ export class DatabaseLogger {
         .prepare(
           `
       SELECT * FROM organization_history 
-      WHERE isReversed = TRUE 
-      ORDER BY timestamp DESC 
+      WHERE isReversed = TRUE
+        AND originalOperationId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM organization_history redos
+          WHERE redos.isReversed = FALSE
+            AND redos.originalOperationId = organization_history.originalOperationId
+            AND redos.id > organization_history.id
+        )
+      ORDER BY timestamp DESC
       LIMIT 1
     `
         )
         .get() as OrganizationHistoryRecord) || null
     );
+  }
+
+  private hasBeenRedone(undoOperation: OrganizationHistoryRecord): boolean {
+    if (!undoOperation.originalOperationId) {
+      return false;
+    }
+
+    const redo = this.db
+      .prepare(
+        `
+      SELECT id FROM organization_history
+      WHERE isReversed = FALSE
+        AND originalOperationId = ?
+        AND id > ?
+      LIMIT 1
+    `
+      )
+      .get(undoOperation.originalOperationId, undoOperation.id) as
+      | { id: number }
+      | null;
+
+    return redo !== null;
   }
 
   private serializeDirectoryMap(

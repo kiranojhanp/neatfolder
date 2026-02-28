@@ -450,6 +450,83 @@ describe("DatabaseLogger", () => {
 
       rmSync(testDir, { recursive: true, force: true });
     });
+
+    test("should not allow redoing the same undo twice", async () => {
+      const testDir = join(tmpdir(), `redo-once-${Date.now()}`);
+      const sourcePath = join(testDir, "file.txt");
+      const targetDir = join(testDir, "documents");
+      const targetPath = join(targetDir, "file.txt");
+
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(sourcePath, "initial file");
+
+      const beforeStructure = new Map<string, Set<string>>();
+      beforeStructure.set(testDir, new Set(["file.txt"]));
+
+      const afterStructure = new Map<string, Set<string>>();
+      afterStructure.set(targetDir, new Set(["file.txt"]));
+
+      const fileMappings: FileMapping[] = [
+        {
+          sourcePath,
+          targetPath,
+          size: 12,
+          modifiedTime: new Date(),
+        },
+      ];
+
+      const stats: OrganizationStats = {
+        filesProcessed: 1,
+        bytesMoved: 12,
+        errors: [],
+        skipped: [],
+        created: new Set([targetDir]),
+      };
+
+      const originalId = dbLogger.logOrganization(
+        testDir,
+        "extension",
+        beforeStructure,
+        afterStructure,
+        fileMappings,
+        stats,
+        1.0
+      );
+
+      mkdirSync(targetDir, { recursive: true });
+      writeFileSync(targetPath, "moved file");
+      rmSync(sourcePath, { force: true });
+
+      const undoResult = await dbLogger.undo(originalId);
+      expect(undoResult).toBe(true);
+      expect(existsSync(sourcePath)).toBe(true);
+      expect(existsSync(targetPath)).toBe(false);
+
+      const undoRecord = dbLogger
+        .getHistory(10)
+        .find((record) => record.isReversed && record.originalOperationId === originalId);
+      expect(undoRecord).toBeDefined();
+
+      const firstRedo = await dbLogger.redo(undoRecord!.id);
+      expect(firstRedo).toBe(true);
+      expect(existsSync(targetPath)).toBe(true);
+      expect(existsSync(sourcePath)).toBe(false);
+
+      const secondRedo = await dbLogger.redo(undoRecord!.id);
+      expect(secondRedo).toBe(false);
+
+      const redoRecords = dbLogger
+        .getHistory(20)
+        .filter(
+          (record) =>
+            !record.isReversed &&
+            record.originalOperationId === originalId &&
+            record.id !== originalId
+        );
+      expect(redoRecords).toHaveLength(1);
+
+      rmSync(testDir, { recursive: true, force: true });
+    });
   });
 
   describe("Database Statistics", () => {
@@ -512,6 +589,67 @@ describe("DatabaseLogger", () => {
       expect(typeof stats.totalOperations).toBe("number");
       expect(typeof stats.totalFilesProcessed).toBe("number");
       expect(typeof stats.totalBytesProcessed).toBe("number");
+    });
+
+    test("should track redo availability after redo is consumed", async () => {
+      const testDir = join(tmpdir(), `redo-stats-${Date.now()}`);
+      const sourcePath = join(testDir, "file.txt");
+      const targetDir = join(testDir, "documents");
+      const targetPath = join(targetDir, "file.txt");
+
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(sourcePath, "initial file");
+
+      const beforeStructure = new Map<string, Set<string>>();
+      beforeStructure.set(testDir, new Set(["file.txt"]));
+
+      const afterStructure = new Map<string, Set<string>>();
+      afterStructure.set(targetDir, new Set(["file.txt"]));
+
+      const fileMappings: FileMapping[] = [
+        {
+          sourcePath,
+          targetPath,
+          size: 12,
+          modifiedTime: new Date(),
+        },
+      ];
+
+      const stats: OrganizationStats = {
+        filesProcessed: 1,
+        bytesMoved: 12,
+        errors: [],
+        skipped: [],
+        created: new Set([targetDir]),
+      };
+
+      const originalId = dbLogger.logOrganization(
+        testDir,
+        "extension",
+        beforeStructure,
+        afterStructure,
+        fileMappings,
+        stats,
+        1.0
+      );
+
+      mkdirSync(targetDir, { recursive: true });
+      writeFileSync(targetPath, "moved file");
+      rmSync(sourcePath, { force: true });
+
+      const undoResult = await dbLogger.undo(originalId);
+      expect(undoResult).toBe(true);
+
+      let dbStats = dbLogger.getStats();
+      expect(dbStats.availableRedos).toBe(1);
+
+      const redoResult = await dbLogger.redo();
+      expect(redoResult).toBe(true);
+
+      dbStats = dbLogger.getStats();
+      expect(dbStats.availableRedos).toBe(0);
+
+      rmSync(testDir, { recursive: true, force: true });
     });
   });
 
