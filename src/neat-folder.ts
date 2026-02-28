@@ -308,15 +308,16 @@ export class NeatFolder {
    * @param path Directory path to validate
    */
   private async validateDirectory(path: string): Promise<void> {
+    let directoryStats;
     try {
-      const directoryStats = await stat(path);
-      if (!directoryStats.isDirectory()) {
-        throw new Error(
-          `Directory does not exist or is not accessible: ${path}`
-        );
-      }
-    } catch (error) {
+      directoryStats = await stat(path);
+    } catch {
       throw new Error(colors.error(`❌ Cannot access directory: ${path}`));
+    }
+    if (!directoryStats.isDirectory()) {
+      throw new Error(
+        colors.error(`❌ Path exists but is not a directory: ${path}`)
+      );
     }
   }
 

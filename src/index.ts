@@ -278,6 +278,7 @@ const parseArguments = (): ParsedArguments => {
 
 const main = async () => {
   const cmdOptions = parseArguments();
+  let organizer: NeatFolder | undefined;
 
   try {
     const options: OrganizationOptions = {
@@ -292,7 +293,7 @@ const main = async () => {
     };
 
     // Create organizer with optional database path
-    const organizer = new NeatFolder(options, cmdOptions.databasePath);
+    organizer = new NeatFolder(options, cmdOptions.databasePath);
 
     // Handle database operations first
     let isDatabaseOperation = false;
@@ -399,6 +400,8 @@ const main = async () => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`\x1b[31m❌ Fatal error: ${message}\x1b[0m`);
     process.exit(1);
+  } finally {
+    organizer?.closeDatabase();
   }
 };
 
