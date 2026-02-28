@@ -22,6 +22,8 @@ const COLORS = {
   TURQUOISE: "#00CED1", // For video files
   LIME_GREEN: "#32CD32", // For audio files
   CRIMSON: "#DC143C", // For archive files
+  GOLD: "#FFD700", // For executable files
+  MEDIUM_PURPLE: "#9370DB", // For font files
 };
 
 // Helper function to color text with proper reset
@@ -45,6 +47,8 @@ export const colors = {
   video: (text: string) => colorize(text, COLORS.TURQUOISE),
   audio: (text: string) => colorize(text, COLORS.LIME_GREEN),
   archive: (text: string) => colorize(text, COLORS.CRIMSON),
+  executable: (text: string) => colorize(text, COLORS.GOLD),
+  font: (text: string) => colorize(text, COLORS.MEDIUM_PURPLE),
 };
 
 const CATEGORY_COLOR: Record<string, (text: string) => string> = {
@@ -54,6 +58,8 @@ const CATEGORY_COLOR: Record<string, (text: string) => string> = {
   video: colors.video,
   audio: colors.audio,
   archives: colors.archive,
+  executables: colors.executable,
+  fonts: colors.font,
 };
 
 /**

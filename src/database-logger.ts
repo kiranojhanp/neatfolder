@@ -552,6 +552,7 @@ export class DatabaseLogger {
       history: history,
     };
 
+    await mkdir(dirname(filePath), { recursive: true });
     await Bun.write(filePath, JSON.stringify(exportData, null, 2));
     console.log(colors.success(`📤 History exported to ${filePath}`));
   }
