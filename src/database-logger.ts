@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { $ } from "bun";
-import { resolve } from "path";
+import { mkdir, rename, stat } from "fs/promises";
+import { dirname, resolve } from "path";
 import type {
   OrganizationHistoryRecord,
   FileOperation,
@@ -192,17 +192,10 @@ export class DatabaseLogger {
       for (const mapping of fileMappings.reverse()) {
         try {
           // Check if target file exists
-          const targetExists = await Bun.file(mapping.targetPath).exists();
+          const targetExists = await this.pathExists(mapping.targetPath);
           if (targetExists) {
-            // Create source directory if needed
-            const sourceDir = mapping.sourcePath.substring(
-              0,
-              mapping.sourcePath.lastIndexOf("/")
-            );
-            await $`mkdir -p ${sourceDir}`;
-
-            // Move file back
-            await $`mv ${mapping.targetPath} ${mapping.sourcePath}`;
+            await mkdir(dirname(mapping.sourcePath), { recursive: true });
+            await rename(mapping.targetPath, mapping.sourcePath);
             undoCount++;
           }
         } catch (error) {
@@ -282,17 +275,10 @@ export class DatabaseLogger {
       for (const mapping of fileMappings) {
         try {
           // Check if source file exists
-          const sourceExists = await Bun.file(mapping.sourcePath).exists();
+          const sourceExists = await this.pathExists(mapping.sourcePath);
           if (sourceExists) {
-            // Create target directory if needed
-            const targetDir = mapping.targetPath.substring(
-              0,
-              mapping.targetPath.lastIndexOf("/")
-            );
-            await $`mkdir -p ${targetDir}`;
-
-            // Move file forward again
-            await $`mv ${mapping.sourcePath} ${mapping.targetPath}`;
+            await mkdir(dirname(mapping.targetPath), { recursive: true });
+            await rename(mapping.sourcePath, mapping.targetPath);
             redoCount++;
           }
         } catch (error) {
@@ -337,7 +323,7 @@ export class DatabaseLogger {
       SELECT * FROM organization_history 
       WHERE 1=1
     `;
-    const params: any[] = [];
+    const params: Array<string | number> = [];
 
     if (directory) {
       query += ` AND directory = ?`;
@@ -532,7 +518,7 @@ export class DatabaseLogger {
   /**
    * Clear all history (with confirmation)
    */
-  clearHistory(): void {
+  async clearHistory(): Promise<void> {
     this.db.exec("DELETE FROM file_operations");
     this.db.exec("DELETE FROM organization_history");
     console.log(colors.success("✅ History cleared successfully"));
@@ -541,7 +527,7 @@ export class DatabaseLogger {
   /**
    * Export history to JSON
    */
-  exportHistory(filePath: string): void {
+  async exportHistory(filePath: string): Promise<void> {
     const history = this.getHistory(1000); // Export up to 1000 records
     const exportData = {
       exportedAt: new Date().toISOString(),
@@ -549,7 +535,7 @@ export class DatabaseLogger {
       history: history,
     };
 
-    Bun.write(filePath, JSON.stringify(exportData, null, 2));
+    await Bun.write(filePath, JSON.stringify(exportData, null, 2));
     console.log(colors.success(`📤 History exported to ${filePath}`));
   }
 
@@ -588,14 +574,39 @@ export class DatabaseLogger {
     originalOperation: OrganizationHistoryRecord,
     filesProcessed: number
   ): number {
-    return this.logUndoOperation(
-      {
-        ...originalOperation,
-        isReversed: false,
-        filesProcessed,
-      },
-      filesProcessed
+    const operation = this.db.prepare(`
+      INSERT INTO organization_history (
+        timestamp, directory, method, filesProcessed, bytesMoved, duration,
+        beforeStructure, afterStructure, fileMappings, errors, skipped,
+        isReversed, originalOperationId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?)
+    `);
+
+    const result = operation.run(
+      Date.now(),
+      originalOperation.directory,
+      originalOperation.method,
+      filesProcessed,
+      0,
+      0,
+      originalOperation.beforeStructure,
+      originalOperation.afterStructure,
+      originalOperation.fileMappings,
+      JSON.stringify([]),
+      JSON.stringify([]),
+      originalOperation.id
     );
+
+    return result.lastInsertRowid as number;
+  }
+
+  private async pathExists(path: string): Promise<boolean> {
+    try {
+      await stat(path);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private getOperationById(id: number): OrganizationHistoryRecord | null {

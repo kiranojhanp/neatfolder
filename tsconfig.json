@@ -12,7 +12,9 @@
     "isolatedModules": true,
     "noEmit": true,
     "outDir": "dist",
-    "types": ["bun-types"]
+    "types": ["bun"],
+    "lib": ["ES2020"],
+    "skipLibCheck": true
   },
   "include": ["src"],
   "exclude": ["node_modules"]

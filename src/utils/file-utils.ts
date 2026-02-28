@@ -122,39 +122,26 @@ export const getTargetDirectory = (
   stats: { size: number; mtime: Date },
   method: GroupingMethod
 ): string => {
-  // Handle different organization methods
   switch (method) {
-    case "extension": {
-      // Use the file extension as directory name
-      const ext = path.extname(file).slice(1).toLowerCase();
-      return ext ? ext : "no-extension";
-    }
+    case "extension":
+      return getCategoryFromFile(file);
 
     case "name": {
-      // Use first letter of filename as directory name (uppercase for consistency)
-      const firstChar = path.basename(file)[0]?.toUpperCase() || "0";
-      return firstChar.match(/[A-Z0-9]/) ? firstChar : "other";
+      const firstChar = path.basename(file)[0]?.toLowerCase() || "0";
+      return /[a-z0-9]/.test(firstChar) ? firstChar : "other";
     }
 
     case "date": {
-      // Use modified date as directory name (YYYY-MM)
       const date = stats.mtime;
-      return `${date.getFullYear()}-${(date.getMonth() + 1)
+      return `documents/${date.getFullYear()}/${(date.getMonth() + 1)
         .toString()
         .padStart(2, "0")}`;
     }
 
     case "size": {
-      // Group by file size ranges with clear size boundaries
-      const KB = 1024;
-      const MB = KB * 1024;
-
-      if (stats.size < 10 * KB) return "tiny (< 10KB)";
-      if (stats.size < 100 * KB) return "small (10-100KB)";
-      if (stats.size < MB) return "medium (100KB-1MB)";
-      if (stats.size < 10 * MB) return "large (1-10MB)";
-      if (stats.size < 100 * MB) return "huge (10-100MB)";
-      return "enormous (>100MB)";
+      if (stats.size < 1024 * 1024) return "small";
+      if (stats.size < 100 * 1024 * 1024) return "medium";
+      return "large";
     }
 
     default:

@@ -7,7 +7,7 @@ import type {
   OrganizationStats,
   GroupingMethod,
 } from "../src/types";
-import { existsSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -374,6 +374,82 @@ describe("DatabaseLogger", () => {
       // Should return false because the test files don't actually exist
       expect(typeof redoResult).toBe("boolean");
     });
+
+    test("should log redo with correct semantics", async () => {
+      const testDir = join(tmpdir(), `redo-semantics-${Date.now()}`);
+      const sourcePath = join(testDir, "file.txt");
+      const targetDir = join(testDir, "documents");
+      const targetPath = join(targetDir, "file.txt");
+
+      mkdirSync(targetDir, { recursive: true });
+      writeFileSync(targetPath, "moved file");
+
+      const beforeStructure = new Map<string, Set<string>>();
+      beforeStructure.set(testDir, new Set(["file.txt"]));
+
+      const afterStructure = new Map<string, Set<string>>();
+      afterStructure.set(targetDir, new Set(["file.txt"]));
+
+      const fileMappings: FileMapping[] = [
+        {
+          sourcePath,
+          targetPath,
+          size: 10,
+          modifiedTime: new Date(),
+        },
+      ];
+
+      const stats: OrganizationStats = {
+        filesProcessed: 1,
+        bytesMoved: 10,
+        errors: [],
+        skipped: [],
+        created: new Set([targetDir]),
+      };
+
+      const originalId = dbLogger.logOrganization(
+        testDir,
+        "extension",
+        beforeStructure,
+        afterStructure,
+        fileMappings,
+        stats,
+        1.0
+      );
+
+      const undoResult = await dbLogger.undo(originalId);
+      expect(undoResult).toBe(true);
+      expect(existsSync(sourcePath)).toBe(true);
+
+      const undoRecord = dbLogger
+        .getHistory(10)
+        .find((record) => record.isReversed && record.originalOperationId === originalId);
+      expect(undoRecord).toBeDefined();
+
+      const redoResult = await dbLogger.redo(undoRecord!.id);
+      expect(redoResult).toBe(true);
+      expect(existsSync(targetPath)).toBe(true);
+
+      const redoRecord = dbLogger
+        .getHistory(10)
+        .find(
+          (record) =>
+            !record.isReversed &&
+            record.originalOperationId === originalId &&
+            record.id !== originalId
+        );
+
+      expect(redoRecord).toBeDefined();
+      expect(Boolean(redoRecord!.isReversed)).toBe(false);
+      expect(redoRecord!.beforeStructure).toBe(
+        dbLogger.getHistory(10).find((record) => record.id === originalId)!.beforeStructure
+      );
+      expect(redoRecord!.afterStructure).toBe(
+        dbLogger.getHistory(10).find((record) => record.id === originalId)!.afterStructure
+      );
+
+      rmSync(testDir, { recursive: true, force: true });
+    });
   });
 
   describe("Database Statistics", () => {
@@ -523,7 +599,7 @@ describe("DatabaseLogger", () => {
       expect(operation999).toBeUndefined();
     });
 
-    test("should clear history", () => {
+    test("should clear history", async () => {
       // Add some operations first
       const stats: OrganizationStats = {
         filesProcessed: 1,
@@ -548,14 +624,14 @@ describe("DatabaseLogger", () => {
       expect(dbStats.totalOperations).toBe(1);
 
       // Clear history
-      expect(() => dbLogger.clearHistory()).not.toThrow();
+      await dbLogger.clearHistory();
 
       // Verify history is cleared
       dbStats = dbLogger.getStats();
       expect(dbStats.totalOperations).toBe(0);
     });
 
-    test("should export history to JSON", () => {
+    test("should export history to JSON", async () => {
       // Add a test operation
       const stats: OrganizationStats = {
         filesProcessed: 1,
@@ -578,10 +654,15 @@ describe("DatabaseLogger", () => {
       const exportPath = join(tmpdir(), `export-${Date.now()}.json`);
 
       // Test that exportHistory runs without throwing
-      expect(() => dbLogger.exportHistory(exportPath)).not.toThrow();
+      await dbLogger.exportHistory(exportPath);
 
       // Verify file exists
       expect(existsSync(exportPath)).toBe(true);
+
+      const exportData = JSON.parse(readFileSync(exportPath, "utf8"));
+      expect(typeof exportData.exportedAt).toBe("string");
+      expect(exportData.totalRecords).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray(exportData.history)).toBe(true);
 
       // Clean up
       rmSync(exportPath);

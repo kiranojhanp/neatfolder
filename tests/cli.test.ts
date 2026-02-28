@@ -244,10 +244,35 @@ describe("CLI Interface", () => {
       // Test with directory as first argument
       const result1 = await runCLI([testDir, "--dry-run"]);
       expect(result1.code).toBe(0);
+      expect(result1.stdout).toContain("neatfolder-cli-test-");
 
       // Test with current directory (no directory argument)
       const result2 = await runCLI(["--dry-run"], { cwd: testDir });
       expect(result2.code).toBe(0);
+      expect(result2.stdout).toContain("neatfolder-cli-test-");
+    });
+
+    test("should enforce max-depth in recursive mode", async () => {
+      const nestedLevelOne = join(testDir, "nested");
+      const nestedLevelTwo = join(nestedLevelOne, "two");
+      mkdirSync(nestedLevelTwo, { recursive: true });
+
+      writeFileSync(join(testDir, "root.txt"), "root");
+      writeFileSync(join(nestedLevelOne, "one.txt"), "one");
+      writeFileSync(join(nestedLevelTwo, "two.txt"), "two");
+
+      const result = await runCLI([
+        testDir,
+        "--dry-run",
+        "--recursive",
+        "--max-depth",
+        "1",
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("root.txt");
+      expect(result.stdout).toContain("one.txt");
+      expect(result.stdout).not.toContain("two.txt");
     });
   });
 

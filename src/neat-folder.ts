@@ -1,15 +1,13 @@
-import { resolve } from "path";
-import { Glob, $ } from "bun";
-import { FILE_CATEGORIES, TREE_SYMBOLS } from "./constants";
+import { basename, dirname, join, relative, resolve, sep } from "path";
+import { Glob } from "bun";
+import { mkdir, rename, stat } from "fs/promises";
 import { DatabaseLogger } from "./database-logger";
 import { TreeService } from "./services/tree";
 import { ProgressService } from "./services/progress";
-import { colors, getFileTypeColor, getDirColor } from "./utils/colors";
+import { colors } from "./utils/colors";
 import {
   getCategoryFromFile,
   getTargetDirectory,
-  ensureDirectoryExists,
-  formatSize,
 } from "./utils/file-utils";
 
 import type {
@@ -55,31 +53,7 @@ export class NeatFolder {
     file: string,
     stats: { size: number; mtime: Date }
   ): string {
-    // This is to match the tests which expect specific outputs
-    switch (this.options.method) {
-      case "extension":
-        return getCategoryFromFile(file);
-
-      case "name":
-        return file.charAt(0).toLowerCase();
-
-      case "date": {
-        const date = stats.mtime;
-        return `documents/${date.getFullYear()}/${(date.getMonth() + 1)
-          .toString()
-          .padStart(2, "0")}`;
-      }
-
-      case "size": {
-        const size = stats.size;
-        if (size < 1024 * 1024) return "small";
-        else if (size < 100 * 1024 * 1024) return "medium";
-        else return "large";
-      }
-
-      default:
-        return getCategoryFromFile(file);
-    }
+    return getTargetDirectory(file, stats, this.options.method);
   }
 
   // For backward compatibility with tests
@@ -100,12 +74,11 @@ export class NeatFolder {
     basePath: string
   ): Promise<FileMapping | null> {
     try {
-      const file = Bun.file(filePath);
-      const stats = await file.exists();
-      if (!stats) return null;
+      const fileStats = await stat(filePath);
+      if (!fileStats.isFile()) return null;
 
-      const size = file.size;
-      const fileName = filePath.split("/").pop()!;
+      const size = fileStats.size;
+      const fileName = basename(filePath);
 
       // Apply size filters
       if (this.options.minSize && size < this.options.minSize) {
@@ -124,9 +97,7 @@ export class NeatFolder {
         return null;
       }
 
-      // Get file modification time using shell command
-      const statResult = await $`stat -f "%m" ${filePath}`.text();
-      const modifiedTime = new Date(parseInt(statResult.trim()) * 1000);
+      const modifiedTime = fileStats.mtime;
 
       // Use the class method for backward compatibility with tests
       const targetDir = this.getTargetDirectory(fileName, {
@@ -134,7 +105,7 @@ export class NeatFolder {
         mtime: modifiedTime,
       });
 
-      const targetPath = `${basePath}/${targetDir}/${fileName}`;
+      const targetPath = join(basePath, targetDir, fileName);
 
       return {
         sourcePath: filePath,
@@ -162,12 +133,8 @@ export class NeatFolder {
     dirStructure: DirectoryMap
   ): Promise<void> {
     try {
-      // Extract the target directory and filename
-      const targetDir = mapping.targetPath.substring(
-        0,
-        mapping.targetPath.lastIndexOf("/")
-      );
-      const fileName = mapping.targetPath.split("/").pop()!;
+      const targetDir = dirname(mapping.targetPath);
+      const fileName = basename(mapping.targetPath);
 
       // Always track the structure for database logging
       if (!dirStructure.has(targetDir)) {
@@ -178,11 +145,8 @@ export class NeatFolder {
       // Only perform actual file operations if not in dry run mode
       if (!this.options.dryRun) {
         try {
-          // Create directory using utility function
-          ensureDirectoryExists(targetDir);
-
-          // Move file using shell command
-          await $`mv ${mapping.sourcePath} ${mapping.targetPath}`;
+          await mkdir(targetDir, { recursive: true });
+          await rename(mapping.sourcePath, mapping.targetPath);
 
           // Track created directory
           this.stats.created.add(targetDir);
@@ -220,25 +184,15 @@ export class NeatFolder {
     basePath?: string
   ): DirectoryMap {
     const structure: DirectoryMap = new Map();
+    const baseDirName = basePath ? basename(basePath) : undefined;
 
     for (const filePath of filePaths) {
-      let dir = filePath.substring(0, filePath.lastIndexOf("/"));
-      const fileName = filePath.split("/").pop()!;
+      let dir = dirname(filePath);
+      const fileName = basename(filePath);
 
-      // Make the directory path relative to the base path if provided
-      if (basePath) {
-        if (dir === basePath) {
-          // If the file is in the root directory, use just the directory name
-          dir = basePath.split("/").pop()!;
-        } else if (dir.startsWith(basePath + "/")) {
-          // Strip the base path and keep the relative structure, but prepend base dir name
-          const baseDir = basePath.split("/").pop()!;
-          const relativePath = dir.substring(basePath.length + 1);
-          dir = `${baseDir}/${relativePath}`;
-        } else {
-          // Fallback - use just the directory name
-          dir = basePath.split("/").pop()!;
-        }
+      if (basePath && baseDirName) {
+        const relativeDir = relative(basePath, dir);
+        dir = relativeDir === "" ? baseDirName : join(baseDirName, relativeDir);
       }
 
       // Create a set for this directory if it doesn't exist
@@ -282,6 +236,8 @@ export class NeatFolder {
   public async organize(directory: string): Promise<void> {
     const startTime = Date.now();
     const resolvedPath = resolve(directory);
+
+    this.resetStats();
 
     // Validate the directory exists
     await this.validateDirectory(resolvedPath);
@@ -353,8 +309,8 @@ export class NeatFolder {
    */
   private async validateDirectory(path: string): Promise<void> {
     try {
-      const result = await $`test -d ${path}`.nothrow();
-      if (result.exitCode !== 0) {
+      const directoryStats = await stat(path);
+      if (!directoryStats.isDirectory()) {
         throw new Error(
           `Directory does not exist or is not accessible: ${path}`
         );
@@ -383,6 +339,15 @@ export class NeatFolder {
       dot: !this.options.ignoreDotfiles,
       absolute: true,
     })) {
+      if (this.options.recursive) {
+        const relativePath = relative(path, file);
+        const relativeDir = dirname(relativePath);
+        const depth = relativeDir === "." ? 0 : relativeDir.split(sep).length;
+        const maxDepth = this.options.maxDepth ?? Infinity;
+        if (depth > maxDepth) {
+          continue;
+        }
+      }
       files.push(file);
     }
 
@@ -478,5 +443,13 @@ export class NeatFolder {
 
   closeDatabase(): void {
     this.dbLogger.close();
+  }
+
+  private resetStats(): void {
+    this.stats.filesProcessed = 0;
+    this.stats.bytesMoved = 0;
+    this.stats.errors = [];
+    this.stats.skipped = [];
+    this.stats.created = new Set<string>();
   }
 }
