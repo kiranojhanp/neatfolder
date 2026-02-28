@@ -2,6 +2,7 @@
 
 import { parseArgs } from "util";
 import { NeatFolder } from "./neat-folder";
+import { parseSize } from "./utils/file-utils";
 import type { OrganizationOptions, GroupingMethod } from "./types";
 
 // Type definitions for parsed arguments
@@ -27,32 +28,6 @@ interface ParsedArguments {
   exportHistory?: string;
   databasePath?: string;
 }
-
-// Utility function to parse size strings (e.g., "1MB", "500KB", "2GB")
-const parseSize = (sizeStr: string): number => {
-  if (sizeStr === "Infinity" || sizeStr === "") return Infinity;
-  if (sizeStr === "0" || !sizeStr) return 0;
-
-  const match = sizeStr.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)?$/i);
-  if (!match) {
-    throw new Error(
-      `Invalid size format: ${sizeStr}. Use formats like: 100, 1KB, 2MB, 1.5GB`
-    );
-  }
-
-  const value = parseFloat(match[1]);
-  const unit = (match[2] || "B").toUpperCase();
-
-  const multipliers = {
-    B: 1,
-    KB: 1024,
-    MB: 1024 * 1024,
-    GB: 1024 * 1024 * 1024,
-    TB: 1024 * 1024 * 1024 * 1024,
-  };
-
-  return value * multipliers[unit as keyof typeof multipliers];
-};
 
 // Validate organization method
 const validateMethod = (method: string): GroupingMethod => {
@@ -145,7 +120,7 @@ Quick Commands:
 const parseArguments = (): ParsedArguments => {
   try {
     const { values, positionals } = parseArgs({
-      args: Bun.argv,
+      args: Bun.argv.slice(2),
       options: {
         method: {
           type: "string",
@@ -239,8 +214,7 @@ const parseArguments = (): ParsedArguments => {
       showHelp();
     }
 
-    // Extract directory from positionals (skip bun executable and script path)
-    const directory = positionals.slice(2)[0] || ".";
+    const directory = positionals[0] || ".";
 
     // Validate and parse all arguments with proper error handling
     const method = validateMethod(String(values.method || "extension"));
@@ -294,8 +268,9 @@ const parseArguments = (): ParsedArguments => {
           ? values["database-path"]
           : undefined,
     };
-  } catch (error: any) {
-    console.error(`Error parsing arguments: ${error.message}`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error parsing arguments: ${message}`);
     console.error("Use --help for usage information.");
     process.exit(1);
   }
@@ -303,6 +278,7 @@ const parseArguments = (): ParsedArguments => {
 
 const main = async () => {
   const cmdOptions = parseArguments();
+  let organizer: NeatFolder | undefined;
 
   try {
     const options: OrganizationOptions = {
@@ -317,7 +293,7 @@ const main = async () => {
     };
 
     // Create organizer with optional database path
-    const organizer = new NeatFolder(options, cmdOptions.databasePath);
+    organizer = new NeatFolder(options, cmdOptions.databasePath);
 
     // Handle database operations first
     let isDatabaseOperation = false;
@@ -343,13 +319,13 @@ const main = async () => {
     if (cmdOptions.history) {
       isDatabaseOperation = true;
       // Show all history since we're using boolean
-      await organizer.displayHistory();
+      organizer.displayHistory();
     }
 
     // Handle stats display
     if (cmdOptions.stats) {
       isDatabaseOperation = true;
-      await organizer.displayStats();
+      organizer.displayStats();
     }
 
     // Handle structure comparison
@@ -359,7 +335,7 @@ const main = async () => {
       if (isNaN(operationId)) {
         throw new Error(`Invalid operation ID: ${cmdOptions.showStructure}`);
       }
-      await organizer.showStructureComparison(operationId);
+      organizer.showStructureComparison(operationId);
     }
 
     // Handle clear history
@@ -420,9 +396,12 @@ const main = async () => {
         }
       }
     }
-  } catch (error: any) {
-    console.error(`\x1b[31m❌ Fatal error: ${error.message}\x1b[0m`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`\x1b[31m❌ Fatal error: ${message}\x1b[0m`);
     process.exit(1);
+  } finally {
+    organizer?.closeDatabase();
   }
 };
 

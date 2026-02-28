@@ -332,6 +332,33 @@ describe("NeatFolder", () => {
       // Progress bar now returns empty string for backward compatibility
       expect(progressBar).toBe("");
     });
+
+    test("should reset stats between organize runs", async () => {
+      const options: OrganizationOptions = {
+        method: "extension",
+        ignoreDotfiles: false,
+        recursive: false,
+        dryRun: true,
+        verbose: false,
+      };
+
+      const nf = new NeatFolder(options);
+
+      writeFileSync(join(testDir, "first.txt"), "first");
+      await nf.organize(testDir);
+      const firstRunStats = (nf as any).stats;
+      expect(firstRunStats.filesProcessed).toBe(1);
+
+      rmSync(join(testDir, "first.txt"), { force: true });
+      writeFileSync(join(testDir, "second.txt"), "second");
+
+      await nf.organize(testDir);
+      const secondRunStats = (nf as any).stats;
+      expect(secondRunStats.filesProcessed).toBe(1);
+      expect(secondRunStats.errors).toHaveLength(0);
+
+      nf.closeDatabase();
+    });
   });
 
   describe("Error Handling", () => {

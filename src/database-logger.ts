@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { $ } from "bun";
-import { resolve } from "path";
+import { mkdir, rename, stat } from "fs/promises";
+import { dirname, resolve } from "path";
 import type {
   OrganizationHistoryRecord,
   FileOperation,
@@ -192,17 +192,10 @@ export class DatabaseLogger {
       for (const mapping of fileMappings.reverse()) {
         try {
           // Check if target file exists
-          const targetExists = await Bun.file(mapping.targetPath).exists();
+          const targetExists = await this.pathExists(mapping.targetPath);
           if (targetExists) {
-            // Create source directory if needed
-            const sourceDir = mapping.sourcePath.substring(
-              0,
-              mapping.sourcePath.lastIndexOf("/")
-            );
-            await $`mkdir -p ${sourceDir}`;
-
-            // Move file back
-            await $`mv ${mapping.targetPath} ${mapping.sourcePath}`;
+            await mkdir(dirname(mapping.sourcePath), { recursive: true });
+            await rename(mapping.targetPath, mapping.sourcePath);
             undoCount++;
           }
         } catch (error) {
@@ -256,6 +249,11 @@ export class DatabaseLogger {
       return false;
     }
 
+    if (this.hasBeenRedone(undoOperation)) {
+      console.log(colors.warning("⚠️  Undo operation has already been redone"));
+      return false;
+    }
+
     const originalOperation = this.getOperationById(
       undoOperation.originalOperationId
     );
@@ -282,17 +280,10 @@ export class DatabaseLogger {
       for (const mapping of fileMappings) {
         try {
           // Check if source file exists
-          const sourceExists = await Bun.file(mapping.sourcePath).exists();
+          const sourceExists = await this.pathExists(mapping.sourcePath);
           if (sourceExists) {
-            // Create target directory if needed
-            const targetDir = mapping.targetPath.substring(
-              0,
-              mapping.targetPath.lastIndexOf("/")
-            );
-            await $`mkdir -p ${targetDir}`;
-
-            // Move file forward again
-            await $`mv ${mapping.sourcePath} ${mapping.targetPath}`;
+            await mkdir(dirname(mapping.targetPath), { recursive: true });
+            await rename(mapping.sourcePath, mapping.targetPath);
             redoCount++;
           }
         } catch (error) {
@@ -300,6 +291,11 @@ export class DatabaseLogger {
             colors.error(`❌ Failed to redo ${mapping.sourcePath}: ${error}`)
           );
         }
+      }
+
+      if (redoCount === 0) {
+        console.log(colors.warning("⚠️  No files found to redo"));
+        return false;
       }
 
       // Log the redo operation
@@ -337,7 +333,7 @@ export class DatabaseLogger {
       SELECT * FROM organization_history 
       WHERE 1=1
     `;
-    const params: any[] = [];
+    const params: Array<string | number> = [];
 
     if (directory) {
       query += ` AND directory = ?`;
@@ -466,7 +462,14 @@ export class DatabaseLogger {
       .prepare(
         `
       SELECT COUNT(*) as count FROM organization_history 
-      WHERE isReversed = TRUE AND originalOperationId IS NOT NULL
+      WHERE isReversed = TRUE 
+        AND originalOperationId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM organization_history redos
+          WHERE redos.isReversed = FALSE
+            AND redos.originalOperationId = organization_history.originalOperationId
+            AND redos.id > organization_history.id
+        )
     `
       )
       .get() as { count: number };
@@ -532,7 +535,7 @@ export class DatabaseLogger {
   /**
    * Clear all history (with confirmation)
    */
-  clearHistory(): void {
+  async clearHistory(): Promise<void> {
     this.db.exec("DELETE FROM file_operations");
     this.db.exec("DELETE FROM organization_history");
     console.log(colors.success("✅ History cleared successfully"));
@@ -541,7 +544,7 @@ export class DatabaseLogger {
   /**
    * Export history to JSON
    */
-  exportHistory(filePath: string): void {
+  async exportHistory(filePath: string): Promise<void> {
     const history = this.getHistory(1000); // Export up to 1000 records
     const exportData = {
       exportedAt: new Date().toISOString(),
@@ -549,7 +552,8 @@ export class DatabaseLogger {
       history: history,
     };
 
-    Bun.write(filePath, JSON.stringify(exportData, null, 2));
+    await mkdir(dirname(filePath), { recursive: true });
+    await Bun.write(filePath, JSON.stringify(exportData, null, 2));
     console.log(colors.success(`📤 History exported to ${filePath}`));
   }
 
@@ -588,14 +592,39 @@ export class DatabaseLogger {
     originalOperation: OrganizationHistoryRecord,
     filesProcessed: number
   ): number {
-    return this.logUndoOperation(
-      {
-        ...originalOperation,
-        isReversed: false,
-        filesProcessed,
-      },
-      filesProcessed
+    const operation = this.db.prepare(`
+      INSERT INTO organization_history (
+        timestamp, directory, method, filesProcessed, bytesMoved, duration,
+        beforeStructure, afterStructure, fileMappings, errors, skipped,
+        isReversed, originalOperationId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?)
+    `);
+
+    const result = operation.run(
+      Date.now(),
+      originalOperation.directory,
+      originalOperation.method,
+      filesProcessed,
+      0,
+      0,
+      originalOperation.beforeStructure,
+      originalOperation.afterStructure,
+      originalOperation.fileMappings,
+      JSON.stringify([]),
+      JSON.stringify([]),
+      originalOperation.id
     );
+
+    return result.lastInsertRowid as number;
+  }
+
+  private async pathExists(path: string): Promise<boolean> {
+    try {
+      await stat(path);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private getOperationById(id: number): OrganizationHistoryRecord | null {
@@ -627,13 +656,42 @@ export class DatabaseLogger {
         .prepare(
           `
       SELECT * FROM organization_history 
-      WHERE isReversed = TRUE 
-      ORDER BY timestamp DESC 
+      WHERE isReversed = TRUE
+        AND originalOperationId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM organization_history redos
+          WHERE redos.isReversed = FALSE
+            AND redos.originalOperationId = organization_history.originalOperationId
+            AND redos.id > organization_history.id
+        )
+      ORDER BY timestamp DESC
       LIMIT 1
     `
         )
         .get() as OrganizationHistoryRecord) || null
     );
+  }
+
+  private hasBeenRedone(undoOperation: OrganizationHistoryRecord): boolean {
+    if (!undoOperation.originalOperationId) {
+      return false;
+    }
+
+    const redo = this.db
+      .prepare(
+        `
+      SELECT id FROM organization_history
+      WHERE isReversed = FALSE
+        AND originalOperationId = ?
+        AND id > ?
+      LIMIT 1
+    `
+      )
+      .get(undoOperation.originalOperationId, undoOperation.id) as
+      | { id: number }
+      | null;
+
+    return redo !== null;
   }
 
   private serializeDirectoryMap(

@@ -1,3 +1,5 @@
+import { CATEGORY_EXTENSIONS } from "../constants";
+
 /**
  * Color utility functions for terminal output
  * Uses Bun's color API with ansi codes for better cross-terminal compatibility
@@ -20,6 +22,8 @@ const COLORS = {
   TURQUOISE: "#00CED1", // For video files
   LIME_GREEN: "#32CD32", // For audio files
   CRIMSON: "#DC143C", // For archive files
+  GOLD: "#FFD700", // For executable files
+  MEDIUM_PURPLE: "#9370DB", // For font files
 };
 
 // Helper function to color text with proper reset
@@ -43,94 +47,19 @@ export const colors = {
   video: (text: string) => colorize(text, COLORS.TURQUOISE),
   audio: (text: string) => colorize(text, COLORS.LIME_GREEN),
   archive: (text: string) => colorize(text, COLORS.CRIMSON),
+  executable: (text: string) => colorize(text, COLORS.GOLD),
+  font: (text: string) => colorize(text, COLORS.MEDIUM_PURPLE),
 };
 
-/**
- * File extension categories for consistent coloring
- */
-const FILE_EXTENSIONS = {
-  CODE: [
-    ".js",
-    ".ts",
-    ".py",
-    ".go",
-    ".rs",
-    ".java",
-    ".cpp",
-    ".c",
-    ".jsx",
-    ".tsx",
-    ".php",
-    ".rb",
-    ".swift",
-    ".kt",
-    ".cs",
-    ".html",
-    ".css",
-  ],
-  DOCUMENT: [
-    ".txt",
-    ".md",
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".rtf",
-    ".odt",
-    ".xlsx",
-    ".xls",
-    ".csv",
-    ".ppt",
-    ".pptx",
-  ],
-  IMAGE: [
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".bmp",
-    ".svg",
-    ".webp",
-    ".ico",
-    ".tiff",
-    ".raw",
-  ],
-  VIDEO: [
-    ".mp4",
-    ".avi",
-    ".mov",
-    ".mkv",
-    ".webm",
-    ".flv",
-    ".wmv",
-    ".m4v",
-    ".mpg",
-    ".mpeg",
-    ".3gp",
-  ],
-  AUDIO: [
-    ".mp3",
-    ".wav",
-    ".flac",
-    ".aac",
-    ".ogg",
-    ".m4a",
-    ".wma",
-    ".opus",
-    ".alac",
-    ".aiff",
-  ],
-  ARCHIVE: [
-    ".zip",
-    ".tar",
-    ".gz",
-    ".rar",
-    ".7z",
-    ".bz2",
-    ".xz",
-    ".iso",
-    ".tgz",
-    ".tbz2",
-  ],
+const CATEGORY_COLOR: Record<string, (text: string) => string> = {
+  code: colors.code,
+  documents: colors.document,
+  images: colors.image,
+  video: colors.video,
+  audio: colors.audio,
+  archives: colors.archive,
+  executables: colors.executable,
+  fonts: colors.font,
 };
 
 /**
@@ -141,19 +70,14 @@ const FILE_EXTENSIONS = {
 export const getFileTypeColor = (
   extension: string
 ): ((text: string) => string) => {
-  // Ensure extension starts with a dot and is lowercase
-  const ext = extension.startsWith(".")
-    ? extension.toLowerCase()
-    : `.${extension.toLowerCase()}`;
+  const normalizedExtension = extension.replace(/^\./, "").toLowerCase();
 
-  if (FILE_EXTENSIONS.CODE.includes(ext)) return colors.code;
-  if (FILE_EXTENSIONS.DOCUMENT.includes(ext)) return colors.document;
-  if (FILE_EXTENSIONS.IMAGE.includes(ext)) return colors.image;
-  if (FILE_EXTENSIONS.VIDEO.includes(ext)) return colors.video;
-  if (FILE_EXTENSIONS.AUDIO.includes(ext)) return colors.audio;
-  if (FILE_EXTENSIONS.ARCHIVE.includes(ext)) return colors.archive;
+  for (const [category, extensions] of Object.entries(CATEGORY_EXTENSIONS)) {
+    if ((extensions as readonly string[]).includes(normalizedExtension)) {
+      return CATEGORY_COLOR[category] ?? ((text: string) => text);
+    }
+  }
 
-  // Default: no color for unknown types
   return (text: string) => text;
 };
 

@@ -6,7 +6,7 @@ import type {
   FileMapping,
   DirectoryMap,
 } from "../src/types";
-import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -355,9 +355,7 @@ describe("Integration Tests", () => {
 
       await neatFolder.organize(emptyDir);
 
-      // Should complete without error - the function should run successfully
-      // even with an empty directory
-      expect(true).toBe(true); // Test passes if no error is thrown
+      expect(readdirSync(emptyDir)).toHaveLength(0);
 
       neatFolder.closeDatabase();
     });
@@ -389,6 +387,36 @@ describe("Integration Tests", () => {
       // Both files should be organized regardless of original location
       expect(existsSync(join(testDir, "images", "root.jpg"))).toBe(true);
       expect(existsSync(join(testDir, "documents", "sub.pdf"))).toBe(true);
+
+      neatFolder.closeDatabase();
+    });
+
+    test("should enforce maxDepth when recursive organization is enabled", async () => {
+      const levelOne = join(testDir, "level-one");
+      const levelTwo = join(levelOne, "level-two");
+      mkdirSync(levelTwo, { recursive: true });
+
+      writeFileSync(join(testDir, "root.jpg"), "root image");
+      writeFileSync(join(levelOne, "one.pdf"), "level one document");
+      writeFileSync(join(levelTwo, "two.pdf"), "level two document");
+
+      const options: OrganizationOptions = {
+        method: "extension",
+        ignoreDotfiles: false,
+        recursive: true,
+        dryRun: false,
+        maxDepth: 1,
+        verbose: false,
+      };
+
+      const neatFolder = new NeatFolder(options, dbPath);
+      const consoleSpy = mock(console.log);
+
+      await neatFolder.organize(testDir);
+
+      expect(existsSync(join(testDir, "images", "root.jpg"))).toBe(true);
+      expect(existsSync(join(testDir, "documents", "one.pdf"))).toBe(true);
+      expect(existsSync(join(levelTwo, "two.pdf"))).toBe(true);
 
       neatFolder.closeDatabase();
     });
